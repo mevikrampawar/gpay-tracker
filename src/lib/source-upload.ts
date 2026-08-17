@@ -45,7 +45,7 @@ async function hashContent(data: ArrayBuffer): Promise<string> {
 /* ------------------------------------------------------------------ */
 
 async function ensureRecipient(
-  userId: string,
+  _userId: string,
   rawName: string | null
 ): Promise<string | null> {
   if (!rawName) return null
