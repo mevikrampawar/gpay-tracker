@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 
 export function AuthPage() {
-  const { signInWithGoogle } = useAuth()
+  const { signInWithGoogle, authError, retryMint, clearAuthError } = useAuth()
   const [error, setError] = React.useState("")
   const [busy, setBusy] = React.useState(false)
 
   const handleGoogle = async () => {
     setError("")
+    clearAuthError()
     setBusy(true)
     try {
       await signInWithGoogle()
@@ -25,6 +26,8 @@ export function AuthPage() {
     }
   }
 
+  const displayError = error || authError
+
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
@@ -37,8 +40,20 @@ export function AuthPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+            {displayError && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive text-center">
+                <p>{displayError}</p>
+                {authError && (
+                  <Button
+                    onClick={retryMint}
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                  >
+                    Retry connection
+                  </Button>
+                )}
+              </div>
             )}
             <Button
               onClick={handleGoogle}

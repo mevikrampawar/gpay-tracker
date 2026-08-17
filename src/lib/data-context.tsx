@@ -127,12 +127,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = React.useState<string | null>(null)
 
   const refresh = React.useCallback(async () => {
-    if (!supabaseReady || !user) {
+    if (!user) {
       setDbTx([])
       setRecipients([])
       setCorr([])
       setSourceCount(0)
       setLoading(false)
+      return
+    }
+    if (!supabaseReady) {
+      setDbTx([])
+      setRecipients([])
+      setCorr([])
+      setSourceCount(0)
+      setLoading(false)
+      setError("Not connected to Supabase — auth-exchange may have failed. Please sign out and try again.")
       return
     }
     setLoading(true)
@@ -146,7 +155,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         `recipients?select=*&order=canonical_name`
       ).catch((e: unknown) => { errors.push(`recipients: ${e}`); return [] as DbRecipient[] }),
       restGet<DbCorrelation[]>(
-        `correlations?select=*&order=created_at.desc&limit=5000`
+        `correlations?select=*&order=decided_at.desc.nullsfirst&limit=5000`
       ).catch((e: unknown) => { errors.push(`correlations: ${e}`); return [] as DbCorrelation[] }),
       restGet<{ id: string }[]>(
         `sources?select=id&limit=100`
