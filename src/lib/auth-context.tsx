@@ -1,8 +1,8 @@
 import * as React from "react"
 import {
   auth,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
+  googleProvider,
+  signInWithPopup,
   signOut as fbSignOut,
   onAuthStateChanged,
   type User,
@@ -13,8 +13,7 @@ interface AuthState {
   user: User | null
   loading: boolean
   supabaseReady: boolean
-  signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string) => Promise<void>
+  signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -48,12 +47,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsub
   }, [])
 
-  const signIn = React.useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password)
-  }, [])
-
-  const signUp = React.useCallback(async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password)
+  const signInWithGoogle = React.useCallback(async () => {
+    await signInWithPopup(auth, googleProvider)
   }, [])
 
   const signOut = React.useCallback(async () => {
@@ -63,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <AuthCtx.Provider value={{ user, loading, supabaseReady, signIn, signUp, signOut }}>
+    <AuthCtx.Provider value={{ user, loading, supabaseReady, signInWithGoogle, signOut }}>
       {children}
     </AuthCtx.Provider>
   )
