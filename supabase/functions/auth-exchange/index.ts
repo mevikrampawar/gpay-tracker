@@ -21,10 +21,78 @@ function bytesToBase64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
-async function importRsaKey(jwk: JsonWebKey): Promise<CryptoKey> {
-  return crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
-    "verify",
-  ])
+/* ---- minimal ASN.1 DER parser ---- */
+
+function derReadLength(bytes: Uint8Array, offset: number): [number, number] {
+  const first = bytes[offset]
+  if (first < 0x80) return [first, offset + 1]
+  const numBytes = first & 0x7f
+  let length = 0
+  for (let i = 0; i < numBytes; i++) {
+    length = (length << 8) | bytes[offset + 1 + i]
+  }
+  return [length, offset + 1 + numBytes]
+}
+
+/** Skip one DER element, returning the offset after it. */
+function derSkipElement(bytes: Uint8Array, offset: number): number {
+  offset++ // skip tag byte
+  const [len, lenEnd] = derReadLength(bytes, offset)
+  return lenEnd + len
+}
+
+/**
+ * Extract the SubjectPublicKeyInfo (SPKI) from a DER-encoded X.509 certificate.
+ * SPKI is the 7th element in the TBS Certificate sequence:
+ *   1. version [0], 2. serialNumber, 3. signature, 4. issuer,
+ *   5. validity, 6. subject, 7. subjectPublicKeyInfo ← this one
+ */
+function extractSpkiFromDer(certDer: Uint8Array): Uint8Array {
+  let pos = 0
+
+  // Outer Certificate SEQUENCE
+  pos++ // tag 0x30
+  const [, certBodyStart] = derReadLength(certDer, pos)
+  pos = certBodyStart
+
+  // TBS Certificate SEQUENCE
+  const tbsStart = pos
+  pos++ // tag 0x30
+  const [tbsLen, tbsBodyStart] = derReadLength(certDer, pos)
+  pos = tbsBodyStart
+  const tbsEnd = tbsBodyStart + tbsLen
+
+  // Skip 6 elements to reach subjectPublicKeyInfo
+  for (let i = 0; i < 6; i++) {
+    if (pos >= tbsEnd) throw new Error("X.509: unexpected end of TBS certificate")
+    pos = derSkipElement(certDer, pos)
+  }
+
+  if (pos >= tbsEnd) throw new Error("X.509: subjectPublicKeyInfo not found")
+  const spkiStart = pos
+  pos = derSkipElement(certDer, pos)
+  return certDer.slice(spkiStart, pos)
+}
+
+function pemToDer(pem: string): Uint8Array {
+  const b64 = pem
+    .replace(/-----BEGIN CERTIFICATE-----/, "")
+    .replace(/-----END CERTIFICATE-----/, "")
+    .replace(/\s/g, "")
+  const raw = atob(b64)
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0))
+}
+
+async function importRsaKeyFromPem(pem: string): Promise<CryptoKey> {
+  const certDer = pemToDer(pem)
+  const spki = extractSpkiFromDer(certDer)
+  return crypto.subtle.importKey(
+    "spki",
+    spki,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  )
 }
 
 async function importHmacKey(secret: string): Promise<CryptoKey> {
@@ -32,33 +100,29 @@ async function importHmacKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", enc, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
 }
 
-async function fetchFirebasePublicKeys(): Promise<Map<string, JsonWebKey>> {
+async function fetchFirebasePublicKeys(): Promise<Map<string, CryptoKey>> {
   const res = await fetch(
     "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
   )
   if (!res.ok) throw new Error(`Failed to fetch Firebase public keys: ${res.status}`)
-  const map = new Map<string, JsonWebKey>()
+  const map = new Map<string, CryptoKey>()
   const x509s = (await res.json()) as Record<string, string>
   for (const [kid, pem] of Object.entries(x509s)) {
-    const certLines = pem.replace(/-----BEGIN CERTIFICATE-----/, "").replace(/-----END CERTIFICATE-----/, "").replace(/\s/g, "")
-    const raw = atob(certLines)
-    const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0))
-    const der = new Uint8Array([48, 130, 1, 34, 48, 130, 1, 19, ...bytes.slice(33)])
-    map.set(kid, { kty: "RSA", alg: "RS256", use: "sig", ext: true })
+    map.set(kid, await importRsaKeyFromPem(pem))
   }
   return map
 }
 
 // cache keys for 1h
-let _keysCache: { keys: Map<string, JsonWebKey>; ts: number } | null = null
+let _keysCache: { keys: Map<string, CryptoKey>; ts: number } | null = null
 
 async function getFirebaseKey(kid: string): Promise<CryptoKey> {
   if (!_keysCache || Date.now() - _keysCache.ts > 3_600_000) {
     _keysCache = { keys: await fetchFirebasePublicKeys(), ts: Date.now() }
   }
-  const jwk = _keysCache.keys.get(kid)
-  if (!jwk) throw new Error(`Unknown Firebase key ID: ${kid}`)
-  return importRsaKey(jwk)
+  const key = _keysCache.keys.get(kid)
+  if (!key) throw new Error(`Unknown Firebase key ID: ${kid}`)
+  return key
 }
 
 Deno.serve(async (req) => {
