@@ -239,3 +239,52 @@ export function parseBankCsv(csvText: string): BankTx[] {
   }
   return out
 }
+
+/* ------------------------------------------------------------------ */
+/*  HDFC Bank statement XLSX parser (browser)                          */
+/* ------------------------------------------------------------------ */
+
+export async function parseBankXlsx(file: File): Promise<BankTx[]> {
+  const XLSX = await import("xlsx")
+  const buf = await file.arrayBuffer()
+  const wb = XLSX.read(buf, { type: "array" })
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  if (!sheet) return []
+
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
+  if (rows.length === 0) return []
+
+  // Find header keys by fuzzy matching
+  const keys = Object.keys(rows[0])
+  const find = (h: string) => keys.find((k) => k.toLowerCase().includes(h.toLowerCase())) ?? ""
+
+  const dateKey = find("Date")
+  const narrKey = find("Narration")
+  const refKey = find("Chq")
+  const valKey = find("Value")
+  const wdKey = find("Withdrawal")
+  const depKey = find("Deposit")
+  const balKey = find("Balance")
+
+  const parseAmt = (v: unknown): number | null => {
+    const s = String(v).replace(/,/g, "")
+    const m = s.match(/[\d.]+/)
+    return m ? Math.round(parseFloat(m[0]) * 100) / 100 : null
+  }
+
+  const out: BankTx[] = []
+  for (const row of rows) {
+    const date = String(row[dateKey] ?? "").trim()
+    if (!date) continue
+    const narration = String(row[narrKey] ?? "").trim()
+    const ref = String(row[refKey] ?? "").trim()
+    const valueDate = String(row[valKey] ?? "").trim()
+    const withdrawal = parseAmt(row[wdKey])
+    const deposit = parseAmt(row[depKey])
+    const balance = parseAmt(row[balKey])
+    const upiMatch = narration.match(/\b(\d{12,}|[A-Za-z0-9]{16,})\b/)
+    const upiRef = upiMatch ? upiMatch[1] : null
+    out.push({ date, narration, ref, valueDate, withdrawal, deposit, balance, upiRef })
+  }
+  return out
+}

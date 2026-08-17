@@ -10,7 +10,7 @@
  */
 
 import JSZip from "jszip"
-import { parseMyActivityHtml, parseBankCsv, nameKey, type ParsedTransaction } from "@/lib/parse-takeout"
+import { parseMyActivityHtml, parseBankCsv, parseBankXlsx, nameKey, type ParsedTransaction } from "@/lib/parse-takeout"
 import { findCorrelations, buildCorrelationRows } from "@/lib/correlate"
 import { restGet, restPost } from "@/lib/supabase"
 import type { DbTransaction, DbRecipient, DbSourceRecord } from "@/lib/data-context"
@@ -269,6 +269,152 @@ export async function uploadBankCsv(
 
   if (bankTx.length === 0) {
     result.errors.push("No transactions found in CSV. Expected HDFC bank statement format.")
+    return result
+  }
+
+  onProgress?.(30, `Found ${bankTx.length} bank transactions. Checking for duplicates…`)
+
+  // Hash for dedup
+  const fileData = await file.arrayBuffer()
+  const contentHash = await hashContent(fileData)
+  const existingSources = await restGet<{ id: string }[]>(
+    `master.sources?select=id&content_hash=eq.${contentHash}&limit=1`
+  )
+  if (existingSources.length > 0) {
+    result.errors.push("This file was already imported (same content hash). Skipping.")
+    return result
+  }
+
+  // Create source
+  const [source] = await restPost<{ id: string }[]>(
+    "master.sources",
+    [{
+      kind: "bank_csv",
+      label: file.name,
+      file_name: file.name,
+      content_hash: contentHash,
+      raw_record_count: bankTx.length,
+    }]
+  )
+  result.sourceId = source.id
+
+  // Insert source records
+  const sourceRecords = bankTx.map((t, i) => ({
+    source_id: source.id,
+    row_index: i,
+    raw: t as unknown as Record<string, unknown>,
+  }))
+
+  const BATCH = 500
+  const insertedRecords: DbSourceRecord[] = []
+  for (let i = 0; i < sourceRecords.length; i += BATCH) {
+    const batch = sourceRecords.slice(i, i + BATCH)
+    const recs = await restPost<DbSourceRecord[]>("master.source_records", batch)
+    insertedRecords.push(...recs)
+  }
+
+  // Convert bank tx to ParsedTransaction format for correlation
+  const converted: ParsedTransaction[] = bankTx.map((b, i) => {
+    const dt = new Date(b.date)
+    const isDeposit = b.deposit !== null && b.deposit > 0
+    const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
+    return {
+      id: b.upiRef ?? b.ref ?? `bank-${i}`,
+      ts: dt.toISOString(),
+      year: dt.getFullYear(),
+      month: dt.getMonth() + 1,
+      day: dt.getDate(),
+      hour: dt.getHours(),
+      minute: dt.getMinutes(),
+      weekday: dt.getDay(),
+      type: isDeposit ? "Received" as const : "Paid" as const,
+      amount,
+      name: null,
+      nameKey: null,
+      method: "bank_transfer",
+      status: "Completed",
+      note: b.narration,
+    }
+  })
+
+  onProgress?.(50, "Running correlation engine…")
+
+  const { exactMatches, pendingMatches, newOnly } = findCorrelations(converted, existingTx)
+  result.exactMatches = exactMatches.length
+  result.pendingMatches = pendingMatches.length
+
+  // Insert new bank transactions
+  const txRows: Record<string, unknown>[] = []
+  for (const t of newOnly) {
+    const direction = t.type === "Received" ? "in" : "out"
+    txRows.push({
+      occurred_at: t.ts,
+      amount_paise: Math.round(t.amount * 100),
+      direction,
+      type: t.type.toLowerCase(),
+      method: t.method,
+      status: t.status,
+      external_id: t.id,
+      counterparty_id: null,
+      note: t.note,
+    })
+  }
+
+  const insertedTx: DbTransaction[] = []
+  for (let i = 0; i < txRows.length; i += BATCH) {
+    const batch = txRows.slice(i, i + BATCH)
+    const txs = await restPost<DbTransaction[]>("master.transactions", batch)
+    insertedTx.push(...txs)
+  }
+
+  result.inserted = insertedTx.length
+
+  // Create correlations
+  const recordIdMap = new Map<string, string>()
+  for (let i = 0; i < insertedRecords.length; i++) {
+    recordIdMap.set(converted[i].id, insertedRecords[i].id)
+  }
+
+  const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+  const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+  const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
+  if (allCorrRows.length > 0) {
+    await restPost("master.correlations", allCorrRows)
+  }
+
+  onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
+  return result
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload bank XLSX                                                    */
+/* ------------------------------------------------------------------ */
+
+export async function uploadBankXlsx(
+  file: File,
+  _userId: string,
+  existingTx: DbTransaction[],
+  onProgress?: (pct: number, msg: string) => void
+): Promise<UploadResult> {
+  const result: UploadResult = {
+    sourceId: "",
+    sourceLabel: file.name,
+    sourceKind: "bank_csv",
+    totalParsed: 0,
+    skipped: 0,
+    inserted: 0,
+    exactMatches: 0,
+    pendingMatches: 0,
+    errors: [],
+  }
+
+  onProgress?.(10, "Reading XLSX file…")
+
+  const bankTx = await parseBankXlsx(file)
+  result.totalParsed = bankTx.length
+
+  if (bankTx.length === 0) {
+    result.errors.push("No transactions found in XLSX. Expected HDFC bank statement format.")
     return result
   }
 

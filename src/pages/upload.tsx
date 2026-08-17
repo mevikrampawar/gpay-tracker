@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/page-header"
-import { uploadTakeoutZip, uploadBankCsv, type UploadResult } from "@/lib/source-upload"
+import { uploadTakeoutZip, uploadBankCsv, uploadBankXlsx, type UploadResult } from "@/lib/source-upload"
 import { useAuth } from "@/lib/auth-context"
 import { useData } from "@/lib/data-context"
 import { navigate } from "@/lib/router"
@@ -56,14 +56,15 @@ export function UploadPage() {
     try {
       const isZip = file.name.toLowerCase().endsWith(".zip")
       const isCsv = file.name.toLowerCase().endsWith(".csv")
+      const isXlsx = file.name.toLowerCase().endsWith(".xlsx")
 
-      if (!isZip && !isCsv) {
+      if (!isZip && !isCsv && !isXlsx) {
         setPhase("error")
-        setStatusMsg("Unsupported file type. Please upload a .zip or .csv file.")
+        setStatusMsg("Unsupported file type. Please upload a .zip, .csv, or .xlsx file.")
         return
       }
 
-      const uploadFn = isZip ? uploadTakeoutZip : uploadBankCsv
+      const uploadFn = isZip ? uploadTakeoutZip : isXlsx ? uploadBankXlsx : uploadBankCsv
       const uploadResult = await uploadFn(file, user.uid, dbTransactions, (pct, msg) => {
         setProgress(pct)
         setStatusMsg(msg)
@@ -101,7 +102,7 @@ export function UploadPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Upload Data"
-        description="Import Google Takeout archives or bank CSV statements"
+        description="Import Google Takeout archives or bank statements (CSV/XLSX)"
         icon={Upload}
       />
 
@@ -125,8 +126,9 @@ export function UploadPage() {
             <div className="text-center">
               <p className="text-lg font-medium">Drop your file here</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Supports Google Takeout <Badge variant="secondary">.zip</Badge> and
-                bank statements <Badge variant="secondary">.csv</Badge>
+                Supports Google Takeout <Badge variant="secondary">.zip</Badge>,
+                bank statements <Badge variant="secondary">.csv</Badge> or{" "}
+                <Badge variant="secondary">.xlsx</Badge>
               </p>
             </div>
             <Button variant="outline" onClick={() => inputRef.current?.click()}>
@@ -140,7 +142,7 @@ export function UploadPage() {
       <input
         ref={inputRef}
         type="file"
-        accept=".zip,.csv"
+        accept=".zip,.csv,.xlsx"
         className="hidden"
         onChange={onFileSelect}
       />
