@@ -48,21 +48,6 @@ export function AnalyticsPage() {
   const [view, setView] = React.useState<"monthly" | "yearly" | "cumulative">("monthly")
   const [distributionType, setDistributionType] = React.useState<"Paid" | "Received" | "Sent">("Paid")
 
-  if (!loading && transactions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
-          <Upload className="size-8 text-muted-foreground" />
-        </div>
-        <h2 className="text-lg font-semibold">No data yet</h2>
-        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
-        <Button onClick={() => navigate("/upload")}>
-          Upload Data <ArrowRight />
-        </Button>
-      </div>
-    )
-  }
-
   const totals = React.useMemo(() => computeTotals(transactions), [transactions])
   const monthly = React.useMemo(() => monthlySeries(transactions), [transactions])
   const yearly = React.useMemo(() => yearlySeries(transactions), [transactions])
@@ -194,6 +179,21 @@ export function AnalyticsPage() {
     )
 
   const COLORS = ["var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)", "var(--color-chart-5)"]
+
+  if (!loading && transactions.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+          <Upload className="size-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-lg font-semibold">No data yet</h2>
+        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
+        <Button onClick={() => navigate("/upload")}>
+          Upload Data <ArrowRight />
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">

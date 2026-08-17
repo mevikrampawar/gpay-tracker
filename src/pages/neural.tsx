@@ -172,21 +172,6 @@ export function NeuralPage() {
   const [seed, setSeed] = React.useState(7)
   const [selected, setSelected] = React.useState<NodeData | null>(null)
 
-  if (!loading && transactions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
-          <Upload className="size-8 text-muted-foreground" />
-        </div>
-        <h2 className="text-lg font-semibold">No data yet</h2>
-        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
-        <Button onClick={() => navigate("/upload")}>
-          Upload Data <ArrowRight />
-        </Button>
-      </div>
-    )
-  }
-
   const stats = React.useMemo(() => buildRecipientStats(transactions, overrides), [transactions, overrides])
 
   const pool = React.useMemo(() => {
@@ -214,6 +199,21 @@ export function NeuralPage() {
   )
 
   const background = { background: "radial-gradient(ellipse at center, color-mix(in oklab, var(--chart-2) 10%, transparent) 0%, transparent 62%)" }
+
+  if (!loading && transactions.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+          <Upload className="size-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-lg font-semibold">No data yet</h2>
+        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
+        <Button onClick={() => navigate("/upload")}>
+          Upload Data <ArrowRight />
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">

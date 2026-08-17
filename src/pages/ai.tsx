@@ -66,21 +66,6 @@ export function AiPage() {
   const [draftName, setDraftName] = React.useState("")
   const [limit, setLimit] = React.useState(40)
 
-  if (!loading && transactions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
-          <Upload className="size-8 text-muted-foreground" />
-        </div>
-        <h2 className="text-lg font-semibold">No data yet</h2>
-        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
-        <Button onClick={() => navigate("/upload")}>
-          Upload Data <ArrowRight />
-        </Button>
-      </div>
-    )
-  }
-
   const unknownCount = React.useMemo(
     () => transactions.filter((t) => t.name === null).length,
     [transactions]
@@ -120,6 +105,21 @@ export function AiPage() {
     icon: "activity",
     text: `I analysed ${transactions.length.toLocaleString()} UPI transactions to build this picture.`,
   })
+
+  if (!loading && transactions.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+          <Upload className="size-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-lg font-semibold">No data yet</h2>
+        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
+        <Button onClick={() => navigate("/upload")}>
+          Upload Data <ArrowRight />
+        </Button>
+      </div>
+    )
+  }
 
   const applyName = (s: UnknownSuggestion, name: string) => {
     setTxName(s.txId, name)

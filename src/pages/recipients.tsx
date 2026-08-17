@@ -222,21 +222,6 @@ export function RecipientsPage() {
   const { transactions, loading } = useData()
   const { overrides, setOverride, clearOverrides } = useRecipientOverrides()
   const [q, setQ] = React.useState("")
-
-  if (!loading && transactions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
-          <Upload className="size-8 text-muted-foreground" />
-        </div>
-        <h2 className="text-lg font-semibold">No data yet</h2>
-        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
-        <Button onClick={() => navigate("/upload")}>
-          Upload Data <ArrowRight />
-        </Button>
-      </div>
-    )
-  }
   const [classFilter, setClassFilter] = React.useState<"All" | CounterpartyClass>("All")
   const [sortKey, setSortKey] = React.useState<SortKey>("outflow")
   const [sortDir, setSortDir] = React.useState<SortDir>("desc")
@@ -313,6 +298,21 @@ export function RecipientsPage() {
     for (const r of all) map.set(r.nameKey, r.monthlySpend.slice(-6).map((m) => m.amount))
     return map
   }, [all])
+
+  if (!loading && transactions.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+          <Upload className="size-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-lg font-semibold">No data yet</h2>
+        <p className="text-sm text-muted-foreground">Upload your Google Pay Takeout to get started</p>
+        <Button onClick={() => navigate("/upload")}>
+          Upload Data <ArrowRight />
+        </Button>
+      </div>
+    )
+  }
 
   const selected = selectedKey ? all.find((r) => r.nameKey === selectedKey) ?? null : null
 
