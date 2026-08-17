@@ -137,30 +137,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
     setLoading(true)
     setError(null)
-    try {
-      const [tx, rec, corr, sources] = await Promise.all([
-        restGet<DbTransaction[]>(
-          `transactions?select=*,recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
-        ),
-        restGet<DbRecipient[]>(
-          `recipients?select=*&order=canonical_name`
-        ),
-        restGet<DbCorrelation[]>(
-          `correlations?select=*&order=created_at.desc&limit=5000`
-        ),
-        restGet<{ id: string }[]>(
-          `sources?select=id&limit=100`
-        ),
-      ])
-      setDbTx(tx)
-      setRecipients(rec)
-      setCorr(corr)
-      setSourceCount(sources.length)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
+    const errors: string[] = []
+    const [tx, rec, corr, sources] = await Promise.all([
+      restGet<DbTransaction[]>(
+        `transactions?select=*,recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
+      ).catch((e: unknown) => { errors.push(`transactions: ${e}`); return [] as DbTransaction[] }),
+      restGet<DbRecipient[]>(
+        `recipients?select=*&order=canonical_name`
+      ).catch((e: unknown) => { errors.push(`recipients: ${e}`); return [] as DbRecipient[] }),
+      restGet<DbCorrelation[]>(
+        `correlations?select=*&order=created_at.desc&limit=5000`
+      ).catch((e: unknown) => { errors.push(`correlations: ${e}`); return [] as DbCorrelation[] }),
+      restGet<{ id: string }[]>(
+        `sources?select=id&limit=100`
+      ).catch((e: unknown) => { errors.push(`sources: ${e}`); return [] as { id: string }[] }),
+    ])
+    setDbTx(tx)
+    setRecipients(rec)
+    setCorr(corr)
+    setSourceCount(sources.length)
+    if (errors.length > 0) {
+      setError(errors.join("; "))
     }
+    setLoading(false)
   }, [supabaseReady, user])
 
   React.useEffect(() => {

@@ -1,3 +1,4 @@
+import * as React from "react"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { DataProvider } from "@/lib/data-context"
 import { AppShell } from "@/components/app-shell"
@@ -14,6 +15,31 @@ import { AiPage } from "@/pages/ai"
 import { UploadPage } from "@/pages/upload"
 import { HelpPage } from "@/pages/help"
 import { AuthPage } from "@/pages/auth"
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-8 text-center">
+          <h1 className="text-xl font-semibold text-destructive">Something went wrong</h1>
+          <p className="max-w-md text-sm text-muted-foreground">{this.state.error.message}</p>
+          <button
+            onClick={() => { this.setState({ error: null }); location.reload() }}
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+          >
+            Reload page
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 function PageRouter() {
   const path = useRoute()
@@ -68,9 +94,11 @@ function AppInner() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <AppInner />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppInner />
+      </AuthProvider>
+    </ErrorBoundary>
   )
 }
 
