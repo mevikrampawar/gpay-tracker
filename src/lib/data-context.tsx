@@ -1,53 +1,22 @@
 import * as React from "react"
-import { restGet } from "@/lib/supabase"
 import { useAuth } from "@/lib/auth-context"
+import {
+  getTransactions,
+  getRecipients,
+  getCorrelations,
+  getSources,
+} from "@/lib/firestore-db"
+import type {
+  DbTransaction as RawDbTransaction,
+  DbRecipient,
+  DbCorrelation,
+} from "@/lib/firestore-db"
 
 /* ------------------------------------------------------------------ */
-/*  Types matching the Supabase schema                                 */
+/*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
-export interface DbTransaction {
-  id: string
-  occurred_at: string
-  amount_paise: number
-  direction: "in" | "out"
-  type: "paid" | "received" | "sent"
-  method: string | null
-  status: string | null
-  external_id: string | null
-  counterparty_id: string | null
-  note: string | null
-  recipients?: DbRecipient | null
-}
-
-export interface DbRecipient {
-  id: string
-  canonical_name: string
-  display_name: string | null
-  kind: string
-  notes: string | null
-}
-
-export interface DbCorrelation {
-  id: string
-  transaction_id: string
-  source_record_id: string
-  confidence: number
-  match_method: string
-  status: "pending" | "accepted" | "rejected"
-  decided_at: string | null
-}
-
-export interface DbSourceRecord {
-  id: string
-  source_id: string
-  row_index: number
-  raw: Record<string, unknown>
-}
-
-/* ------------------------------------------------------------------ */
-/*  Bundle-compatible UpiTransaction type (kept for page compatibility) */
-/* ------------------------------------------------------------------ */
+export type { RawDbTransaction as DbTransaction, DbRecipient, DbCorrelation }
 
 export type TransactionType = "Paid" | "Received" | "Sent"
 
@@ -70,13 +39,16 @@ export interface UpiTransaction {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Convert DbTransaction → UpiTransaction                              */
+/*  Convert DbTransaction → UpiTransaction (join with recipients)       */
 /* ------------------------------------------------------------------ */
 
-function dbTxToUpiTx(t: DbTransaction): UpiTransaction {
+function dbTxToUpiTx(t: RawDbTransaction, recipientsMap: Map<string, DbRecipient>): UpiTransaction {
   const dt = new Date(t.occurred_at)
   const ist = new Date(dt.getTime() + 5.5 * 3600000)
   const typeMap: Record<string, UpiTransaction["type"]> = { paid: "Paid", received: "Received", sent: "Sent" }
+
+  const recipient = t.counterparty_id ? recipientsMap.get(t.counterparty_id) ?? null : null
+
   return {
     id: t.external_id ?? t.id,
     ts: t.occurred_at,
@@ -88,8 +60,8 @@ function dbTxToUpiTx(t: DbTransaction): UpiTransaction {
     weekday: ist.getUTCDay(),
     type: typeMap[t.type] ?? "Paid",
     amount: t.amount_paise / 100,
-    name: t.recipients?.display_name ?? t.recipients?.canonical_name ?? null,
-    nameKey: t.recipients?.canonical_name ?? null,
+    name: recipient?.display_name ?? recipient?.canonical_name ?? null,
+    nameKey: recipient?.canonical_name ?? null,
     method: t.method,
     status: t.status,
     note: t.note ?? "",
@@ -101,7 +73,7 @@ function dbTxToUpiTx(t: DbTransaction): UpiTransaction {
 /* ------------------------------------------------------------------ */
 
 export interface DataState {
-  dbTransactions: DbTransaction[]
+  dbTransactions: RawDbTransaction[]
   transactions: UpiTransaction[]
   recipients: DbRecipient[]
   correlations: DbCorrelation[]
@@ -115,11 +87,9 @@ export interface DataState {
 
 const DataCtx = React.createContext<DataState | null>(null)
 
-const PAGE = 1000
-
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const { user, supabaseReady } = useAuth()
-  const [dbTx, setDbTx] = React.useState<DbTransaction[]>([])
+  const { user } = useAuth()
+  const [dbTx, setDbTx] = React.useState<RawDbTransaction[]>([])
   const [recipients, setRecipients] = React.useState<DbRecipient[]>([])
   const [correlations, setCorr] = React.useState<DbCorrelation[]>([])
   const [sourceCount, setSourceCount] = React.useState(0)
@@ -135,31 +105,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
       return
     }
-    if (!supabaseReady) {
-      setDbTx([])
-      setRecipients([])
-      setCorr([])
-      setSourceCount(0)
-      setLoading(false)
-      setError("Not connected to Supabase — auth-exchange may have failed. Please sign out and try again.")
-      return
-    }
     setLoading(true)
     setError(null)
     const errors: string[] = []
     const [tx, rec, corr, sources] = await Promise.all([
-      restGet<DbTransaction[]>(
-        `transactions?select=*,recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
-      ).catch((e: unknown) => { errors.push(`transactions: ${e}`); return [] as DbTransaction[] }),
-      restGet<DbRecipient[]>(
-        `recipients?select=*&order=canonical_name`
-      ).catch((e: unknown) => { errors.push(`recipients: ${e}`); return [] as DbRecipient[] }),
-      restGet<DbCorrelation[]>(
-        `correlations?select=*&order=decided_at.desc.nullsfirst&limit=5000`
-      ).catch((e: unknown) => { errors.push(`correlations: ${e}`); return [] as DbCorrelation[] }),
-      restGet<{ id: string }[]>(
-        `sources?select=id&limit=100`
-      ).catch((e: unknown) => { errors.push(`sources: ${e}`); return [] as { id: string }[] }),
+      getTransactions(user.uid).catch((e: unknown) => { errors.push(`transactions: ${e}`); return [] as RawDbTransaction[] }),
+      getRecipients(user.uid).catch((e: unknown) => { errors.push(`recipients: ${e}`); return [] as DbRecipient[] }),
+      getCorrelations(user.uid).catch((e: unknown) => { errors.push(`correlations: ${e}`); return [] as DbCorrelation[] }),
+      getSources(user.uid).catch((e: unknown) => { errors.push(`sources: ${e}`); return [] as { id: string }[] }),
     ])
     setDbTx(tx)
     setRecipients(rec)
@@ -169,13 +122,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setError(errors.join("; "))
     }
     setLoading(false)
-  }, [supabaseReady, user])
+  }, [user])
 
   React.useEffect(() => {
     refresh()
   }, [refresh])
 
-  const transactions = React.useMemo(() => dbTx.map(dbTxToUpiTx), [dbTx])
+  const recipientsMap = React.useMemo(
+    () => new Map(recipients.map((r) => [r.id, r])),
+    [recipients]
+  )
+
+  const transactions = React.useMemo(
+    () => dbTx.map((t) => dbTxToUpiTx(t, recipientsMap)),
+    [dbTx, recipientsMap]
+  )
 
   const hasData = dbTx.length > 0 || sourceCount > 0
   const pendingCorrelations = correlations.filter((c) => c.status === "pending").length

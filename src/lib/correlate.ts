@@ -183,13 +183,13 @@ export function findCorrelations(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build correlation rows for Supabase insert                          */
+/*  Build correlation rows for Firestore insert                         */
 /* ------------------------------------------------------------------ */
 
 export function buildCorrelationRows(
   matches: CorrelationCandidate[],
   getSourceRecordId: (tx: ParsedTransaction) => string | null
-): Omit<DbCorrelation, "id" | "user_id">[] {
+): Omit<DbCorrelation, "id">[] {
   return matches.map((m) => ({
     transaction_id: m.existingTx.id,
     source_record_id: getSourceRecordId(m.newRecord) ?? "",

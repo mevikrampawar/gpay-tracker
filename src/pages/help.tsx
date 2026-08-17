@@ -71,7 +71,7 @@ export function HelpPage() {
               GPay Insights is a personal finance dashboard that transforms your Google Pay
               transaction history into actionable insights. It provides KPIs, spending trends,
               recipient analytics, AI-powered analysis, and more — all processed locally with
-              data stored securely in Supabase.
+              data stored securely in Firestore.
             </CardContent>
           </Card>
           <Card>
@@ -219,7 +219,7 @@ export function HelpPage() {
           <FaqItem
             icon={Shield}
             question="Is my data secure?"
-            answer="All processing happens locally in your browser. Raw files are never sent to any server. Only the parsed transaction data is stored in your encrypted Supabase database, which is protected by Row Level Security."
+            answer="All processing happens locally in your browser. Raw files are never sent to any server. Only the parsed transaction data is stored in your Firestore database, secured by Firebase Authentication."
           />
           <FaqItem
             icon={RefreshCw}
