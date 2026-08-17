@@ -59,7 +59,7 @@ function confidenceColor(c: number) {
 }
 
 export function AiPage() {
-  const { transactions, storeTransactions, cashback, groupExpenses, statementMatched, loading } = useData()
+  const { transactions, loading } = useData()
   const { edits, txNames, setTxName } = useRecipientEdits()
   const [skipped, setSkipped] = React.useState<Set<string>>(new Set())
   const [editing, setEditing] = React.useState<UnknownSuggestion | null>(null)
@@ -109,7 +109,7 @@ export function AiPage() {
         0,
         unknownCount,
         highConfidence.length,
-        statementMatched,
+        0,
         avgMonthlySpend,
         lastMonth?.outflow ?? 0,
         lastMonth ? monthLabel(lastMonth.year, lastMonth.month) : "this month"
@@ -118,7 +118,7 @@ export function AiPage() {
   )
   narrative.points.unshift({
     icon: "activity",
-    text: `I analysed ${transactions.length.toLocaleString()} UPI transactions, ${storeTransactions.length} store purchases, ${cashback.length} cashback credits and ${groupExpenses.length} group expenses to build this picture.`,
+    text: `I analysed ${transactions.length.toLocaleString()} UPI transactions to build this picture.`,
   })
 
   const applyName = (s: UnknownSuggestion, name: string) => {
@@ -141,7 +141,7 @@ export function AiPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-medium text-muted-foreground">Transactions analysed</CardTitle>
@@ -156,14 +156,6 @@ export function AiPage() {
           </CardHeader>
           <CardContent className="text-2xl font-semibold tabular-nums">
             {unknownCount.toLocaleString()}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Named from statement</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold tabular-nums">
-            {statementMatched.toLocaleString()}
           </CardContent>
         </Card>
         <Card>

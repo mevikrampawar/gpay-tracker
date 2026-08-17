@@ -7,6 +7,21 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 const SUPABASE_JWT_SECRET = Deno.env.get("JWT_SECRET")!
 const FIREBASE_PROJECT_ID = Deno.env.get("FIREBASE_PROJECT_ID") || "personal-trans-tracker"
 
+const ALLOWED_ORIGINS = [
+  "https://mevikrampawar.github.io",
+  "http://localhost:5173",
+]
+
+function getCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") ?? ""
+  const allowed = ALLOWED_ORIGINS.includes(origin)
+  return {
+    "Access-Control-Allow-Origin": allowed ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "authorization,content-type",
+  }
+}
+
 /* ---- tiny JWT helpers (no deps) ---- */
 
 function base64urlToBytes(b64: string): Uint8Array {
@@ -126,16 +141,11 @@ async function getFirebaseKey(kid: string): Promise<CryptoKey> {
 }
 
 Deno.serve(async (req) => {
+  const cors = getCorsHeaders(req)
+
   // CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization,content-type",
-      },
-    })
+    return new Response(null, { status: 204, headers: cors })
   }
 
   try {
@@ -190,12 +200,10 @@ Deno.serve(async (req) => {
     const sig = await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(sigInput))
     const supabaseJwt = `${sigInput}.${bytesToBase64url(new Uint8Array(sig))}`
 
-    return json({ access_token: supabaseJwt, expires_in: 60 * 60 * 24 * 7 }, 200, {
-      "Access-Control-Allow-Origin": "*",
-    })
+    return json({ access_token: supabaseJwt, expires_in: 60 * 60 * 24 * 7 }, 200, cors)
   } catch (e) {
     console.error("auth-exchange error", e)
-    return json({ error: String(e) }, 500, { "Access-Control-Allow-Origin": "*" })
+    return json({ error: String(e) }, 500, cors)
   }
 })
 

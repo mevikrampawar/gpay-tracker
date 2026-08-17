@@ -19,7 +19,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { ExportButton } from "@/components/export-button"
 import { TypeBadge } from "@/components/transaction-badges"
 import { useData } from "@/lib/data-context"
-import type { UpiTransaction } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
 import { formatINR, formatINRFull, dateTimeLabel, weekdayName, isWithinPeriod } from "@/lib/format"
 import { navigate } from "@/lib/router"
 import { cn } from "@/lib/utils"

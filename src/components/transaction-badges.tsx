@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import type { TransactionType } from "@/data/bundle"
+import type { TransactionType } from "@/lib/data-context"
 import type { CounterpartyClass } from "@/lib/classify"
 
 export function TypeBadge({ type }: { type: TransactionType }) {

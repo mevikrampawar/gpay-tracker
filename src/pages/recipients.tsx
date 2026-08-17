@@ -23,7 +23,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { ExportButton } from "@/components/export-button"
 import { Sparkline } from "@/components/sparkline"
 import { useData } from "@/lib/data-context"
-import type { UpiTransaction } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
 import { buildRecipientStats, type RecipientStat } from "@/lib/analytics"
 import type { CounterpartyClass } from "@/lib/classify"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"

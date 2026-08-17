@@ -1,8 +1,7 @@
-import type { UpiTransaction } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
 import { computeTotals } from "@/lib/analytics"
 import { dateLabel } from "@/lib/format"
 import type { RecipientEdits, TxNames } from "@/lib/recipient-edits"
-import statementData from "@/data/statement-entries.json"
 
 /* ------------------------------------------------------------------ */
 /*  Local on-device AI: name suggestions for unknown transactions       */
@@ -19,60 +18,12 @@ export interface UnknownSuggestion {
   method: string | null
 }
 
-interface StmtEntry {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  type: string
-  rawName: string
-  amount: number
-}
-
-function istMin(ts: string) {
-  const d = new Date(new Date(ts).getTime() + 5.5 * 3600000)
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-    min: d.getUTCHours() * 60 + d.getUTCMinutes(),
-  }
-}
-
-/** Match an unknown transaction against the GPay statement PDF data. */
-function statementMatch(t: UpiTransaction, byKey: Map<string, StmtEntry[]>) {
-  const ist = istMin(t.ts)
-  const cands = byKey.get(`${ist.year}-${ist.month}-${ist.day}|${t.type}|${t.amount}`) ?? []
-  if (cands.length === 0) return null
-  let best: StmtEntry | null = null
-  let bestDiff = 1e9
-  let tie = false
-  for (const c of cands) {
-    const d = Math.abs((c.hour * 60 + c.minute) - ist.min)
-    if (d < bestDiff) {
-      bestDiff = d
-      best = c
-      tie = false
-    } else if (d === bestDiff) tie = true
-  }
-  if (!best || tie || bestDiff > 5) return null
-  return best
-}
 
 export function suggestUnknownNames(
   tx: UpiTransaction[],
   edits: RecipientEdits,
   txNames: TxNames
 ): UnknownSuggestion[] {
-  const entries = (statementData.entries ?? []) as StmtEntry[]
-  const stKey = new Map<string, StmtEntry[]>()
-  for (const e of entries) {
-    const k = `${e.year}-${e.month}-${e.day}|${e.type}|${e.amount}`
-    if (!stKey.has(k)) stKey.set(k, [])
-    stKey.get(k)!.push(e)
-  }
-
   // Signature -> dominant recipient name, for named transactions.
   const sig = new Map<string, Map<string, number>>()
   const amountOnly = new Map<string, Map<string, number>>()
@@ -107,22 +58,6 @@ export function suggestUnknownNames(
   for (const t of tx) {
     if (t.name !== null || t.nameKey !== null) continue
     if (txNames[t.id]) continue
-
-    const st = statementMatch(t, stKey)
-    if (st) {
-      const name = st.rawName.trim()
-      out.push({
-        txId: t.id,
-        name,
-        confidence: 0.95,
-        reason: `Matches your Feb–Jul 2026 GPay statement (₹${t.amount} · ${dateLabel(st.year, st.month, st.day)})`,
-        amount: t.amount,
-        type: t.type,
-        ts: t.ts,
-        method: t.method,
-      })
-      continue
-    }
 
     const bucket = Math.floor(t.hour / 3) * 3
     const mk = `${t.amount}|${t.method ?? "?"}|${bucket}|${t.weekday}`

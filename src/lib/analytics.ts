@@ -1,4 +1,4 @@
-import type { UpiTransaction } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
 import { classifyName, type CounterpartyClass } from "@/lib/classify"
 import { monthKey } from "@/lib/format"
 import { enrichTransactions, type RecipientEdits, type TxNames } from "@/lib/recipient-edits"

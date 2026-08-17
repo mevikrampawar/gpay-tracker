@@ -1,4 +1,4 @@
-import type { UpiTransaction, StoreTransaction, CashbackReward, GroupExpense } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
 import { buildRecipientStats, type RecipientOverrides } from "@/lib/analytics"
 import { classifyName } from "@/lib/classify"
 import { formatINR, monthLabel, dateLabel, weekdayName, monthKey } from "@/lib/format"
@@ -28,10 +28,6 @@ function findLatestTx(tx: UpiTransaction[], pred: (t: UpiTransaction) => boolean
 export function buildInsights(
   tx: UpiTransaction[],
   overrides: RecipientOverrides,
-  store: StoreTransaction[],
-  cashback: CashbackReward[],
-  groups: GroupExpense[],
-  statementMatched = 0
 ): Insight[] {
   const out: Insight[] = []
 
@@ -185,75 +181,6 @@ export function buildInsights(
       href: "/recipients",
       cta: "Browse recipients",
       priority: 65,
-    })
-  }
-
-  if (statementMatched > 0) {
-    out.push({
-      id: "statement-match",
-      icon: "file-check",
-      tone: "blue",
-      title: `${statementMatched} transactions named from your statement`,
-      body: "Feb–Jul 2026 GPay statement was correlated to unnamed history",
-      href: "/transactions",
-      cta: "Explore",
-      priority: 40,
-    })
-  }
-
-  const cashbackTotal = cashback.reduce((s, c) => s + c.amount, 0)
-  if (cashbackTotal > 0) {
-    out.push({
-      id: "cashback",
-      icon: "gift",
-      tone: "green",
-      title: `Earned ${formatINR(cashbackTotal)} in rewards`,
-      body: `${cashback.length} cashback credits · ${cashback.length ? formatINR(Math.round(cashbackTotal / cashback.length)) : "₹0"} average`,
-      href: "/rewards",
-      cta: "View rewards",
-      priority: 45,
-    })
-  }
-
-  const storeSubs = store.filter((t) => t.status === "Complete" && /membership|super chat/i.test(t.description ?? ""))
-  if (storeSubs.length > 0) {
-    const v = storeSubs.reduce((s, t) => s + t.amount, 0)
-    out.push({
-      id: "store-subs",
-      icon: "refresh-cw",
-      tone: "violet",
-      title: `${storeSubs.length} store membership${storeSubs.length > 1 ? "s" : ""}`,
-      body: `Approx ${formatINR(v)} on memberships / super chats in the Play store`,
-      href: "/store",
-      cta: "View store",
-      priority: 50,
-    })
-  }
-
-  let groupNet = 0
-  let groupItems = 0
-  for (const g of groups) {
-    for (const it of g.items) {
-      if (it.payer !== "Vikram Pawar") continue
-      if (it.state === "PAID_RECEIVED") groupNet += it.amount ?? 0
-      else {
-        groupNet -= it.amount ?? 0
-        groupItems++
-      }
-    }
-  }
-  if (groupNet !== 0) {
-    out.push({
-      id: "group-position",
-      icon: "split",
-      tone: groupNet < 0 ? "amber" : "green",
-      title: groupNet < 0 ? `You still owe ${formatINR(-groupNet)}` : `You are owed ${formatINR(groupNet)}`,
-      body: groupNet < 0
-        ? `${groupItems} pending share${groupItems > 1 ? "s" : ""} across group expenses`
-        : "All your group shares are settled up",
-      href: "/groups",
-      cta: "Settlements",
-      priority: 55,
     })
   }
 

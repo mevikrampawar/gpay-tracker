@@ -1,6 +1,7 @@
 import * as React from "react"
 import type { CounterpartyClass } from "@/lib/classify"
-import type { UpiTransaction } from "@/data/bundle"
+import type { UpiTransaction } from "@/lib/data-context"
+import { nameKey } from "@/lib/parse-takeout"
 
 /**
  * Recipient editing & relations.
@@ -14,16 +15,7 @@ import type { UpiTransaction } from "@/data/bundle"
  * Everything is stored locally (no network), so the dashboard stays fully offline.
  */
 
-/** Normalize a name into a stable grouping key (mirrors scripts/build-data.mjs). */
-export function nameKey(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\bs\s+o\b/g, " ")
-    .replace(/\b(mr|mrs|ms|miss|master|dr|shri|smt|sri)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
+export { nameKey }
 
 export interface RecipientEdit {
   /** Custom display name. */
@@ -35,6 +27,8 @@ export interface RecipientEdit {
   /** Classification override. */
   cls?: CounterpartyClass
 }
+
+/** Follow linkedTo chains + aliases to the canonical nameKey of an entity. */
 
 export type RecipientEdits = Record<string, RecipientEdit>
 

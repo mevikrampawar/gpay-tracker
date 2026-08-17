@@ -41,7 +41,7 @@ async function hashContent(data: ArrayBuffer): Promise<string> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Ensure recipient exists in identity.recipients                      */
+/*  Ensure recipient exists in recipients table                          */
 /* ------------------------------------------------------------------ */
 
 async function ensureRecipient(
@@ -54,13 +54,13 @@ async function ensureRecipient(
 
   // Try to find existing
   const existing = await restGet<DbRecipient[]>(
-    `identity.recipients?select=id&canonical_name=eq.${encodeURIComponent(key)}&limit=1`
+    `recipients?select=id&canonical_name=eq.${encodeURIComponent(key)}&limit=1`
   )
   if (existing.length > 0) return existing[0].id
 
   // Create new
   const created = await restPost<DbRecipient[]>(
-    "identity.recipients",
+    "recipients",
     [{
       canonical_name: key,
       display_name: rawName,
@@ -119,7 +119,7 @@ export async function uploadTakeoutZip(
 
   // Check if this exact file was already imported
   const existingSources = await restGet<{ id: string }[]>(
-    `master.sources?select=id&content_hash=eq.${contentHash}&limit=1`
+    `sources?select=id&content_hash=eq.${contentHash}&limit=1`
   )
   if (existingSources.length > 0) {
     result.errors.push("This file was already imported (same content hash). Skipping.")
@@ -128,7 +128,7 @@ export async function uploadTakeoutZip(
 
   // 4. Create source record
   const [source] = await restPost<{ id: string }[]>(
-    "master.sources",
+    "sources",
     [{
       kind: "takeout",
       label: file.name,
@@ -161,7 +161,7 @@ export async function uploadTakeoutZip(
   const insertedRecords: DbSourceRecord[] = []
   for (let i = 0; i < sourceRecords.length; i += BATCH) {
     const batch = sourceRecords.slice(i, i + BATCH)
-    const recs = await restPost<DbSourceRecord[]>("master.source_records", batch)
+    const recs = await restPost<DbSourceRecord[]>("source_records", batch)
     insertedRecords.push(...recs)
   }
 
@@ -202,7 +202,7 @@ export async function uploadTakeoutZip(
   const insertedTx: DbTransaction[] = []
   for (let i = 0; i < txRows.length; i += BATCH) {
     const batch = txRows.slice(i, i + BATCH)
-    const txs = await restPost<DbTransaction[]>("master.transactions", batch)
+    const txs = await restPost<DbTransaction[]>("transactions", batch)
     insertedTx.push(...txs)
   }
 
@@ -217,7 +217,7 @@ export async function uploadTakeoutZip(
 
   const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
   if (allCorrRows.length > 0) {
-    await restPost("master.correlations", allCorrRows)
+    await restPost("correlations", allCorrRows)
   }
 
   // 9. Auto-apply names from exact matches to existing transactions
@@ -227,7 +227,7 @@ export async function uploadTakeoutZip(
     if (!m.existingTx.counterparty_id) {
       const rid = await ensureRecipient(userId, m.newRecord.name)
       if (rid) {
-        await restPost("master.transactions", [{
+        await restPost("transactions", [{
           id: m.existingTx.id,
           counterparty_id: rid,
         }])
@@ -278,7 +278,7 @@ export async function uploadBankCsv(
   const fileData = await file.arrayBuffer()
   const contentHash = await hashContent(fileData)
   const existingSources = await restGet<{ id: string }[]>(
-    `master.sources?select=id&content_hash=eq.${contentHash}&limit=1`
+    `sources?select=id&content_hash=eq.${contentHash}&limit=1`
   )
   if (existingSources.length > 0) {
     result.errors.push("This file was already imported (same content hash). Skipping.")
@@ -287,7 +287,7 @@ export async function uploadBankCsv(
 
   // Create source
   const [source] = await restPost<{ id: string }[]>(
-    "master.sources",
+    "sources",
     [{
       kind: "bank_csv",
       label: file.name,
@@ -309,7 +309,7 @@ export async function uploadBankCsv(
   const insertedRecords: DbSourceRecord[] = []
   for (let i = 0; i < sourceRecords.length; i += BATCH) {
     const batch = sourceRecords.slice(i, i + BATCH)
-    const recs = await restPost<DbSourceRecord[]>("master.source_records", batch)
+    const recs = await restPost<DbSourceRecord[]>("source_records", batch)
     insertedRecords.push(...recs)
   }
 
@@ -363,7 +363,7 @@ export async function uploadBankCsv(
   const insertedTx: DbTransaction[] = []
   for (let i = 0; i < txRows.length; i += BATCH) {
     const batch = txRows.slice(i, i + BATCH)
-    const txs = await restPost<DbTransaction[]>("master.transactions", batch)
+    const txs = await restPost<DbTransaction[]>("transactions", batch)
     insertedTx.push(...txs)
   }
 
@@ -379,7 +379,7 @@ export async function uploadBankCsv(
   const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
   const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
   if (allCorrRows.length > 0) {
-    await restPost("master.correlations", allCorrRows)
+    await restPost("correlations", allCorrRows)
   }
 
   onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
@@ -424,7 +424,7 @@ export async function uploadBankXlsx(
   const fileData = await file.arrayBuffer()
   const contentHash = await hashContent(fileData)
   const existingSources = await restGet<{ id: string }[]>(
-    `master.sources?select=id&content_hash=eq.${contentHash}&limit=1`
+    `sources?select=id&content_hash=eq.${contentHash}&limit=1`
   )
   if (existingSources.length > 0) {
     result.errors.push("This file was already imported (same content hash). Skipping.")
@@ -433,7 +433,7 @@ export async function uploadBankXlsx(
 
   // Create source
   const [source] = await restPost<{ id: string }[]>(
-    "master.sources",
+    "sources",
     [{
       kind: "bank_csv",
       label: file.name,
@@ -455,7 +455,7 @@ export async function uploadBankXlsx(
   const insertedRecords: DbSourceRecord[] = []
   for (let i = 0; i < sourceRecords.length; i += BATCH) {
     const batch = sourceRecords.slice(i, i + BATCH)
-    const recs = await restPost<DbSourceRecord[]>("master.source_records", batch)
+    const recs = await restPost<DbSourceRecord[]>("source_records", batch)
     insertedRecords.push(...recs)
   }
 
@@ -509,7 +509,7 @@ export async function uploadBankXlsx(
   const insertedTx: DbTransaction[] = []
   for (let i = 0; i < txRows.length; i += BATCH) {
     const batch = txRows.slice(i, i + BATCH)
-    const txs = await restPost<DbTransaction[]>("master.transactions", batch)
+    const txs = await restPost<DbTransaction[]>("transactions", batch)
     insertedTx.push(...txs)
   }
 
@@ -525,7 +525,7 @@ export async function uploadBankXlsx(
   const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
   const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
   if (allCorrRows.length > 0) {
-    await restPost("master.correlations", allCorrRows)
+    await restPost("correlations", allCorrRows)
   }
 
   onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)

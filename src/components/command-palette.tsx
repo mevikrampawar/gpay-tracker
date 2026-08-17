@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/command"
 import { buildRecipientStats } from "@/lib/analytics"
 import { buildInsights } from "@/lib/insights"
-import { bundle } from "@/data/bundle"
+import { useData } from "@/lib/data-context"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
 import { formatINR } from "@/lib/format"
 import { navigate } from "@/lib/router"
@@ -45,6 +45,7 @@ export function CommandPalette({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { transactions } = useData()
   const { overrides } = useRecipientOverrides()
   const [query, setQuery] = React.useState("")
 
@@ -53,13 +54,13 @@ export function CommandPalette({
   }, [open])
 
   const recipients = React.useMemo(
-    () => buildRecipientStats(bundle.transactions, overrides).slice(0, 50),
-    [overrides]
+    () => buildRecipientStats(transactions, overrides).slice(0, 50),
+    [transactions, overrides]
   )
 
   const insights = React.useMemo(
-    () => buildInsights(bundle.transactions, overrides, bundle.storeTransactions, bundle.cashback, bundle.groupExpenses).slice(0, 6),
-    [overrides]
+    () => buildInsights(transactions, overrides).slice(0, 6),
+    [transactions, overrides]
   )
 
   const filtered = React.useMemo(() => {

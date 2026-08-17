@@ -1,7 +1,6 @@
 import * as React from "react"
 import { restGet } from "@/lib/supabase"
 import { useAuth } from "@/lib/auth-context"
-import { bundle, type UpiTransaction, type StoreTransaction, type CashbackReward, type Voucher, type GroupExpense } from "@/data/bundle"
 
 /* ------------------------------------------------------------------ */
 /*  Types matching the Supabase schema                                 */
@@ -47,12 +46,35 @@ export interface DbSourceRecord {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Convert DbTransaction → UpiTransaction (bundle-compatible)          */
+/*  Bundle-compatible UpiTransaction type (kept for page compatibility) */
+/* ------------------------------------------------------------------ */
+
+export type TransactionType = "Paid" | "Received" | "Sent"
+
+export interface UpiTransaction {
+  id: string
+  ts: string
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  weekday: number
+  type: "Paid" | "Received" | "Sent"
+  amount: number
+  name: string | null
+  nameKey: string | null
+  method: string | null
+  status: string | null
+  note: string
+}
+
+/* ------------------------------------------------------------------ */
+/*  Convert DbTransaction → UpiTransaction                              */
 /* ------------------------------------------------------------------ */
 
 function dbTxToUpiTx(t: DbTransaction): UpiTransaction {
   const dt = new Date(t.occurred_at)
-  // Convert UTC back to IST display values
   const ist = new Date(dt.getTime() + 5.5 * 3600000)
   const typeMap: Record<string, UpiTransaction["type"]> = { paid: "Paid", received: "Received", sent: "Sent" }
   return {
@@ -79,35 +101,15 @@ function dbTxToUpiTx(t: DbTransaction): UpiTransaction {
 /* ------------------------------------------------------------------ */
 
 export interface DataState {
-  /** Raw Supabase transactions */
   dbTransactions: DbTransaction[]
-  /** Bundle-compatible transactions (from Supabase or fallback to bundle) */
   transactions: UpiTransaction[]
-  /** Recipients from Supabase */
   recipients: DbRecipient[]
-  /** Correlations from Supabase */
   correlations: DbCorrelation[]
-  /** Store transactions (from bundle — not yet in Supabase) */
-  storeTransactions: StoreTransaction[]
-  /** Cashback rewards (from bundle) */
-  cashback: CashbackReward[]
-  /** Vouchers (from bundle) */
-  vouchers: Voucher[]
-  /** Group expenses (from bundle) */
-  groupExpenses: GroupExpense[]
-  /** Statement correlation count */
-  statementMatched: number
-  /** Whether user has any uploaded data */
   hasData: boolean
-  /** True while loading from Supabase */
   loading: boolean
-  /** Error message if fetch failed */
   error: string | null
-  /** Re-fetch from Supabase */
   refresh: () => Promise<void>
-  /** Source records count */
   sourceCount: number
-  /** Pending correlations count */
   pendingCorrelations: number
 }
 
@@ -138,16 +140,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     try {
       const [tx, rec, corr, sources] = await Promise.all([
         restGet<DbTransaction[]>(
-          `master.transactions?select=*,identity.recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
+          `transactions?select=*,recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
         ),
         restGet<DbRecipient[]>(
-          `identity.recipients?select=*&order=canonical_name`
+          `recipients?select=*&order=canonical_name`
         ),
         restGet<DbCorrelation[]>(
-          `master.correlations?select=*&order=created_at.desc&limit=5000`
+          `correlations?select=*&order=created_at.desc&limit=5000`
         ),
         restGet<{ id: string }[]>(
-          `master.sources?select=id&limit=100`
+          `sources?select=id&limit=100`
         ),
       ])
       setDbTx(tx)
@@ -165,14 +167,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     refresh()
   }, [refresh])
 
-  // Convert DB transactions to bundle-compatible format
-  const transactions = React.useMemo(() => {
-    if (dbTx.length > 0) {
-      return dbTx.map(dbTxToUpiTx)
-    }
-    // Fallback to bundle when no Supabase data
-    return bundle.transactions
-  }, [dbTx])
+  const transactions = React.useMemo(() => dbTx.map(dbTxToUpiTx), [dbTx])
 
   const hasData = dbTx.length > 0 || sourceCount > 0
   const pendingCorrelations = correlations.filter((c) => c.status === "pending").length
@@ -183,11 +178,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       transactions,
       recipients,
       correlations,
-      storeTransactions: bundle.storeTransactions,
-      cashback: bundle.cashback,
-      vouchers: bundle.vouchers,
-      groupExpenses: bundle.groupExpenses,
-      statementMatched: bundle.meta.statementMatched ?? 0,
       hasData,
       loading,
       error,

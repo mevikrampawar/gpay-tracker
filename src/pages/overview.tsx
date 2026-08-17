@@ -3,13 +3,9 @@ import {
   ArrowLeftRight,
   ReceiptText,
   Users,
-  Store,
   TrendingUp,
-  Gift,
-  Split,
   ExternalLink,
   Sparkles,
-  FileCheck,
 } from "lucide-react"
 import {
   Card,
@@ -42,7 +38,7 @@ import {
 } from "@/lib/analytics"
 import { buildInsights, oldestMonthLabel, latestMonthLabel } from "@/lib/insights"
 import { classifyName } from "@/lib/classify"
-import { formatINR, formatINRFull, monthLabel, dateTimeLabel } from "@/lib/format"
+import { formatINR, monthLabel, dateTimeLabel } from "@/lib/format"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
 import { navigate } from "@/lib/router"
 import { Button } from "@/components/ui/button"
@@ -52,7 +48,7 @@ import { Upload, ArrowRight } from "lucide-react"
 const CHART_COLORS = ["var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)", "var(--color-chart-5)", "var(--color-chart-6)", "var(--color-chart-7)"]
 
 export function OverviewPage() {
-  const { transactions, storeTransactions, cashback, vouchers, groupExpenses, statementMatched, loading } = useData()
+  const { transactions, loading } = useData()
   const { overrides } = useRecipientOverrides()
 
   if (!loading && transactions.length === 0) {
@@ -77,8 +73,8 @@ export function OverviewPage() {
   )
 
   const insights = React.useMemo(
-    () => buildInsights(transactions, overrides, storeTransactions, cashback, groupExpenses, statementMatched),
-    [transactions, overrides, storeTransactions, cashback, groupExpenses, statementMatched]
+    () => buildInsights(transactions, overrides),
+    [transactions, overrides]
   )
 
   const monthlyChartData = React.useMemo(
@@ -127,31 +123,6 @@ export function OverviewPage() {
 
   const outflowTotal = outflowByClass.reduce((s, d) => s + d.value, 0)
 
-  const storeSpend = React.useMemo(
-    () =>
-      storeTransactions
-        .filter((t) => t.status === "Complete" && t.amount > 0)
-        .reduce((s, t) => s + t.amount, 0),
-    []
-  )
-  const cashbackTotal = React.useMemo(
-    () => cashback.reduce((s, c) => s + c.amount, 0),
-    []
-  )
-  const groupOwed = React.useMemo(
-    () =>
-      groupExpenses.reduce((s, g) => {
-        let gsum = 0
-        for (const it of g.items) {
-          if (it.state === "UNPAID" && it.payer === "Vikram Pawar") {
-            gsum += it.amount ?? 0
-          }
-        }
-        return s + gsum
-      }, 0),
-    []
-  )
-
   const topRecipients = recipients.slice(0, 8)
 
   return (
@@ -163,25 +134,6 @@ export function OverviewPage() {
       />
 
       <section className="flex flex-col gap-2">
-        {statementMatched ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-500/25 bg-sky-500/5 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
-                <FileCheck className="size-4" />
-              </div>
-              <div className="text-sm">
-                <span className="font-medium">Statement correlation</span>
-                <span className="text-muted-foreground">
-                  {" "}· {statementMatched.toLocaleString()} unnamed transactions were named from your Feb–Jul 2026 GPay statement
-                </span>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => navigate("/transactions")}>
-              See them <ExternalLink />
-            </Button>
-          </div>
-        ) : null}
-
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
@@ -258,24 +210,6 @@ export function OverviewPage() {
             sub: `${totals.uniqueMerchants.toLocaleString()} merchants`,
             icon: Users,
             accent: "neutral",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Store & Subscriptions",
-            value: formatINR(storeSpend),
-            sub: `${storeTransactions.filter((t) => t.status === "Complete").length} purchases`,
-            icon: Store,
-            accent: "neutral",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Rewards Earned",
-            value: formatINR(cashbackTotal),
-            sub: `${cashback.length} cashbacks · ${vouchers.length} vouchers`,
-            icon: Gift,
-            accent: "up",
           }}
         />
       </div>
@@ -407,64 +341,6 @@ export function OverviewPage() {
             })}
           </CardContent>
         </Card>
-
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Gift className="size-4 text-muted-foreground" /> Rewards snapshot
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Cashback earned</span>
-                <span className="font-semibold tabular-nums">{formatINRFull(cashbackTotal)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Vouchers</span>
-                <span className="font-semibold tabular-nums">{vouchers.length}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Avg cashback</span>
-                <span className="font-semibold tabular-nums">
-                  {formatINR(cashbackTotal / Math.max(1, cashback.length))}
-                </span>
-              </div>
-              <Button variant="outline" size="sm" className="mt-1" onClick={() => navigate("/rewards")}>
-                Reward details <ExternalLink />
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Split className="size-4 text-muted-foreground" /> Group expenses
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Groups</span>
-                <span className="font-semibold tabular-nums">{groupExpenses.length}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Total split value</span>
-                <span className="font-semibold tabular-nums">
-                  {formatINR(groupExpenses.reduce((s, g) => s + (g.totalAmount ?? 0), 0))}
-                </span>
-              </div>
-              {groupOwed > 0 && (
-                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
-                  <span>You owe (unpaid)</span>
-                  <span className="font-semibold tabular-nums">{formatINRFull(groupOwed)}</span>
-                </div>
-              )}
-              <Button variant="outline" size="sm" className="mt-1" onClick={() => navigate("/groups")}>
-                Settlements <ExternalLink />
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
       </div>
 
       <Card>
