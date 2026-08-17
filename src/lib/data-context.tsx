@@ -138,16 +138,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     try {
       const [tx, rec, corr, sources] = await Promise.all([
         restGet<DbTransaction[]>(
-          `transactions?select=*,recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
+          `master.transactions?select=*,identity.recipients(display_name,canonical_name,kind)&order=occurred_at.desc&limit=${PAGE}`
         ),
         restGet<DbRecipient[]>(
-          `recipients?select=*&order=canonical_name`
+          `identity.recipients?select=*&order=canonical_name`
         ),
         restGet<DbCorrelation[]>(
-          `correlations?select=*&order=created_at.desc&limit=5000`
+          `master.correlations?select=*&order=created_at.desc&limit=5000`
         ),
         restGet<{ id: string }[]>(
-          `sources?select=id&limit=100`
+          `master.sources?select=id&limit=100`
         ),
       ])
       setDbTx(tx)
