@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Users, Search, ChevronRight, Download, Pin, PinOff, ChevronLeft, Pencil, Link2, Unlink, Merge, Upload, ArrowRight } from "lucide-react"
+import { Users, Search, ChevronRight, Download, Pin, PinOff, ChevronLeft, Upload, ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -35,14 +35,6 @@ import type { UpiTransaction } from "@/data/bundle"
 import { buildRecipientStats, type RecipientStat } from "@/lib/analytics"
 import type { CounterpartyClass } from "@/lib/classify"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
-import {
-  useRecipientEdits,
-  enrichTransactions,
-  resolveKey,
-  linkedNames,
-  nameKey,
-  type RecipientEdits,
-} from "@/lib/recipient-edits"
 import { formatINR, monthLabel, dateTimeLabel } from "@/lib/format"
 import { navigate } from "@/lib/router"
 import { downloadCSV } from "@/lib/export-utils"

@@ -2,7 +2,6 @@
  * Supabase data client — talks to PostgREST using a Supabase-compatible JWT
  * minted from the user's Firebase ID token via the auth-exchange Edge Function.
  */
-import { type User } from "firebase/auth"
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
