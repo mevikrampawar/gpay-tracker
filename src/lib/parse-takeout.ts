@@ -27,7 +27,7 @@ function parseISTDate(raw: string): Date | null {
   let hour = parseInt(hr, 10)
   if (ap.toUpperCase() === "PM" && hour !== 12) hour += 12
   if (ap.toUpperCase() === "AM" && hour === 12) hour = 0
-  return new Date(Date.UTC(year, month, day, hour, min, parseInt(sec ?? "0", 10)) - 5.5 * 3600000)
+  return new Date(Date.UTC(parseInt(year), month, parseInt(day), hour, parseInt(min), parseInt(sec ?? "0", 10)) - 5.5 * 3600000)
 }
 
 /** Convert a full name to a stable grouping key. */

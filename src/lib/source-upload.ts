@@ -245,7 +245,7 @@ export async function uploadTakeoutZip(
 
 export async function uploadBankCsv(
   file: File,
-  userId: string,
+  _userId: string,
   existingTx: DbTransaction[],
   onProgress?: (pct: number, msg: string) => void
 ): Promise<UploadResult> {

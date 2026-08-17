@@ -42,6 +42,7 @@ import { navigate, useRoute } from "@/lib/router"
 import { computeTotals, buildRecipientStats } from "@/lib/analytics"
 import { formatINR } from "@/lib/format"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
+import { useData } from "@/lib/data-context"
 
 export const NAV_ITEMS = [
   { path: "/", label: "Overview", icon: LayoutDashboard },

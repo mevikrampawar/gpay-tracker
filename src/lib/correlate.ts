@@ -17,7 +17,7 @@
  * non-exact correlations.
  */
 
-import type { DbTransaction, DbSourceRecord, DbCorrelation } from "@/lib/data-context"
+import type { DbTransaction, DbCorrelation } from "@/lib/data-context"
 import type { ParsedTransaction } from "@/lib/parse-takeout"
 
 /* ------------------------------------------------------------------ */
@@ -41,22 +41,6 @@ function normExternalId(id: string | null): string | null {
   // Skip generic IDs like "act-123"
   if (/^act-\d+$/.test(s)) return null
   return s
-}
-
-/** Same day check (ignoring time). */
-function sameDay(a: string, b: string): boolean {
-  const da = new Date(a)
-  const db = new Date(b)
-  return (
-    da.getUTCFullYear() === db.getUTCFullYear() &&
-    da.getUTCMonth() === db.getUTCMonth() &&
-    da.getUTCDate() === db.getUTCDate()
-  )
-}
-
-/** Amount within tolerance (exact paise match for UPI). */
-function sameAmount(a: number, b: number): boolean {
-  return Math.abs(a - b) < 1 // < 1 paise tolerance
 }
 
 /** Name similarity — exact canonical key match after normalising. */

@@ -1,8 +1,7 @@
 import type { UpiTransaction } from "@/data/bundle"
 import { computeTotals } from "@/lib/analytics"
-import { dateLabel, monthKey } from "@/lib/format"
+import { dateLabel } from "@/lib/format"
 import type { RecipientEdits, TxNames } from "@/lib/recipient-edits"
-import { nameKey } from "@/lib/recipient-edits"
 import statementData from "@/data/statement-entries.json"
 
 /* ------------------------------------------------------------------ */
