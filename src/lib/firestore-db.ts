@@ -109,7 +109,7 @@ export async function getRecipients(userId: string): Promise<DbRecipient[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbRecipient))
 }
 
-export async function getCorrelations(userId: string, max = 50000): Promise<DbCorrelation[]> {
+export async function getCorrelations(userId: string, max = 10000): Promise<DbCorrelation[]> {
   const snap = await getDocs(
     query(col(userId, "correlations"), fbLimit(max))
   )
@@ -426,7 +426,7 @@ export function subscribeRecipients(
 export function subscribeCorrelations(
   userId: string,
   callback: (corr: DbCorrelation[]) => void,
-  max = 50000
+  max = 10000
 ): () => void {
   return onSnapshot(
     query(col(userId, "correlations"), fbLimit(max)),

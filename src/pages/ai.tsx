@@ -143,7 +143,7 @@ export function AiPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-medium text-muted-foreground">Transactions analysed</CardTitle>
@@ -232,6 +232,15 @@ export function AiPage() {
                   {s.method ? ` · ${s.method}` : ""}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground/80">{s.reason}</div>
+                {s.matchEvidence && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {s.matchEvidence.split(" · ").map((e, i) => (
+                      <span key={i} className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                        {e}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-1.5 h-1 w-24 overflow-hidden rounded-full bg-muted">
                   <div className={cn("h-full rounded-full", confidenceColor(s.confidence))} style={{ width: `${s.confidence * 100}%` }} />
                 </div>

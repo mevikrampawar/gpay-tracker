@@ -19,8 +19,9 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PageHeader } from "@/components/page-header"
-import { uploadTakeoutZip, uploadBankCsv, uploadBankXlsx, type UploadResult, PasswordRequiredError } from "@/lib/source-upload"
+import { uploadTakeoutZip, uploadBankCsv, uploadBankXlsx, uploadStoreCsv, uploadCashbackCsv, uploadVoucherJson, uploadGroupExpensesJson, type UploadResult, PasswordRequiredError } from "@/lib/source-upload"
 import { useAuth } from "@/lib/auth-context"
 import { useData } from "@/lib/data-context"
 import { navigate } from "@/lib/router"
@@ -41,6 +42,7 @@ export function UploadPage() {
   const [progressLogs, setProgressLogs] = React.useState<Array<{ time: number; message: string }>>([])
   const [passwordModal, setPasswordModal] = React.useState<{ open: boolean; error: boolean }>({ open: false, error: false })
   const [passwordInput, setPasswordInput] = React.useState("")
+  const [uploadKind, setUploadKind] = React.useState<"auto" | "takeout" | "bank" | "store" | "cashback" | "vouchers" | "group_expenses">("auto")
   const pendingFileRef = React.useRef<File | null>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
 
@@ -51,6 +53,7 @@ export function UploadPage() {
     setResult(null)
     setFileName("")
     setProgressLogs([])
+    setUploadKind("auto")
   }
 
   const handleFile = async (file: File, password?: string) => {
@@ -65,14 +68,27 @@ export function UploadPage() {
       const isZip = file.name.toLowerCase().endsWith(".zip")
       const isCsv = file.name.toLowerCase().endsWith(".csv")
       const isXlsx = file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls")
+      const isJson = file.name.toLowerCase().endsWith(".json")
 
-      if (!isZip && !isCsv && !isXlsx) {
+      if (!isZip && !isCsv && !isXlsx && !isJson) {
         setPhase("error")
-        setStatusMsg("Unsupported file type. Please upload a .zip, .csv, .xlsx, or .xls file.")
+        setStatusMsg("Unsupported file type. Please upload a .zip, .csv, .xlsx, .xls, or .json file.")
         return
       }
 
-      const uploadFn = isZip ? uploadTakeoutZip : isXlsx ? uploadBankXlsx : uploadBankCsv
+      const uploadFn = (() => {
+        if (uploadKind === "takeout") return uploadTakeoutZip
+        if (uploadKind === "bank") return isXlsx ? uploadBankXlsx : uploadBankCsv
+        if (uploadKind === "store") return uploadStoreCsv
+        if (uploadKind === "cashback") return uploadCashbackCsv
+        if (uploadKind === "vouchers") return uploadVoucherJson
+        if (uploadKind === "group_expenses") return uploadGroupExpensesJson
+        // Auto-detect
+        if (isZip) return uploadTakeoutZip
+        if (isXlsx) return uploadBankXlsx
+        if (isJson) return uploadGroupExpensesJson
+        return uploadBankCsv
+      })()
       const uploadResult = await uploadFn(file, user.uid, (pct, log) => {
         setProgress(pct)
         setProgressLogs(prev => {
@@ -127,6 +143,24 @@ export function UploadPage() {
       />
 
       {phase === "idle" && (
+        <>
+          <div className="mb-4">
+            <label className="text-sm font-medium mb-2 block">What are you uploading?</label>
+            <Select value={uploadKind} onValueChange={(v) => setUploadKind(v)}>
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto-detect (recommended)</SelectItem>
+                <SelectItem value="takeout">Google Takeout (ZIP)</SelectItem>
+                <SelectItem value="bank">Bank Statement (CSV/XLSX)</SelectItem>
+                <SelectItem value="store">Store Transactions (CSV)</SelectItem>
+                <SelectItem value="cashback">Cashback Rewards (CSV)</SelectItem>
+                <SelectItem value="vouchers">Voucher Rewards (JSON)</SelectItem>
+                <SelectItem value="group_expenses">Group Expenses (JSON)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         <Card
           className={cn(
             "cursor-pointer border-2 border-dashed transition-colors",
@@ -144,7 +178,10 @@ export function UploadPage() {
               <Upload className="size-8 text-muted-foreground" />
             </div>
             <div className="text-center">
-              <p className="text-lg font-medium">Drop your file here</p>
+              <p className="text-lg font-medium">
+                <span className="hidden sm:inline">Drop your file here</span>
+                <span className="sm:hidden">Tap to select a file</span>
+              </p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Supports Google Takeout <Badge variant="secondary">.zip</Badge>,
                 bank statements <Badge variant="secondary">.csv</Badge>,{" "}
@@ -158,12 +195,13 @@ export function UploadPage() {
             </Button>
           </CardContent>
         </Card>
+        </>
       )}
 
       <input
         ref={inputRef}
         type="file"
-        accept=".zip,.csv,.xlsx,.xls"
+        accept=".zip,.csv,.xlsx,.xls,.json"
         className="hidden"
         onChange={onFileSelect}
       />
@@ -221,6 +259,14 @@ export function UploadPage() {
               <StatCard label="Pending Review" value={result.pendingMatches} />
               <StatCard label="Skipped" value={result.skipped + result.errors.length} />
             </div>
+            {(result.storeCount ?? 0) > 0 || (result.rewardsCount ?? 0) > 0 || (result.vouchersCount ?? 0) > 0 || (result.groupExpensesCount ?? 0) > 0 ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {(result.storeCount ?? 0) > 0 && <StatCard label="Store Transactions" value={result.storeCount!} />}
+                {(result.rewardsCount ?? 0) > 0 && <StatCard label="Cashback Rewards" value={result.rewardsCount!} />}
+                {(result.vouchersCount ?? 0) > 0 && <StatCard label="Voucher Rewards" value={result.vouchersCount!} />}
+                {(result.groupExpensesCount ?? 0) > 0 && <StatCard label="Group Expenses" value={result.groupExpensesCount!} />}
+              </div>
+            ) : null}
             {result.errors.length > 0 && (
               <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-sm">
                 <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />

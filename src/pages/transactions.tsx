@@ -323,9 +323,9 @@ export function TransactionsPage() {
               onChange={(e) => setFilter("q", e.target.value)}
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Select value={filters.type} onValueChange={(v) => setFilter("type", v as Filters["type"])}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-full sm:w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -337,7 +337,7 @@ export function TransactionsPage() {
               </SelectContent>
             </Select>
             <Select value={filters.range} onValueChange={(v) => setFilter("range", v as Filters["range"])}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-full sm:w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -351,7 +351,7 @@ export function TransactionsPage() {
               </SelectContent>
             </Select>
             <Select value={filters.method} onValueChange={(v) => setFilter("method", v ?? "All")}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <SelectValue placeholder="Method" />
               </SelectTrigger>
               <SelectContent>
@@ -403,6 +403,7 @@ export function TransactionsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -493,6 +494,7 @@ export function TransactionsPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 

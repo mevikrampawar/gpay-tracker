@@ -16,13 +16,14 @@ export function Sparkline({
   fillOpacity?: number
 }) {
   const gid = useId().replace(/[:]/g, "")
-  if (!data.length) return <div className={className} style={{ width, height }} />
-  const min = Math.min(...data)
-  const max = Math.max(...data)
+  const clean = data.filter((v) => Number.isFinite(v))
+  if (!clean.length) return <div className={className} style={{ width, height }} />
+  const min = Math.min(...clean)
+  const max = Math.max(...clean)
   const range = max - min || 1
   const pad = 2
-  const step = (width - pad * 2) / Math.max(1, data.length - 1)
-  const pts = data.map((v, i) => {
+  const step = (width - pad * 2) / Math.max(1, clean.length - 1)
+  const pts = clean.map((v, i) => {
     const x = pad + i * step
     const y = pad + (height - pad * 2) * (1 - (v - min) / range)
     return `${x.toFixed(2)},${y.toFixed(2)}`

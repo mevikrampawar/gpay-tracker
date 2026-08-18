@@ -16,6 +16,7 @@ export interface UnknownSuggestion {
   type: string
   ts: string
   method: string | null
+  matchEvidence?: string
 }
 
 
@@ -65,7 +66,7 @@ export function suggestUnknownNames(
     const mk = `${t.amount}|${t.method ?? "?"}|${bucket}|${t.weekday}`
     const fromSig = dominant(sig.get(mk) ?? new Map(), 0.6)
     if (fromSig) {
-      const confidence = Math.min(0.8, 0.55 + fromSig.count * 0.04)
+      const confidence = Math.min(0.95, 0.55 + fromSig.count * 0.04)
       out.push({
         txId: t.id,
         name: fromSig.name,
@@ -77,6 +78,7 @@ export function suggestUnknownNames(
         type: t.type,
         ts: t.ts,
         method: t.method,
+        matchEvidence: `Amount: ₹${t.amount} · Day: ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][t.weekday]} · Method: ${t.method ?? "?"} · Pattern: ${fromSig.count}×`,
       })
       continue
     }
@@ -92,6 +94,7 @@ export function suggestUnknownNames(
         type: t.type,
         ts: t.ts,
         method: t.method,
+        matchEvidence: `Amount: ₹${t.amount} · Method: ${t.method ?? "?"} · Pattern: ${fromAm.count}×`,
       })
       continue
     }
@@ -107,6 +110,7 @@ export function suggestUnknownNames(
         type: t.type,
         ts: t.ts,
         method: t.method,
+        matchEvidence: `Amount: ₹${t.amount} · Pattern: ${fromAmt.count}×`,
       })
     }
   }

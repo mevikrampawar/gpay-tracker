@@ -14,6 +14,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import {
   Area,
@@ -38,18 +45,20 @@ import {
 } from "@/lib/analytics"
 import { buildInsights, oldestMonthLabel, latestMonthLabel } from "@/lib/insights"
 import { classifyName } from "@/lib/classify"
-import { formatINR, monthLabel, dateTimeLabel } from "@/lib/format"
+import { formatINR, formatINRFull, monthLabel, dateTimeLabel, weekdayName } from "@/lib/format"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
 import { navigate } from "@/lib/router"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Upload, ArrowRight } from "lucide-react"
+import type { UpiTransaction } from "@/lib/data-context"
 
 const CHART_COLORS = ["var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)", "var(--color-chart-5)", "var(--color-chart-6)", "var(--color-chart-7)"]
 
 export function OverviewPage() {
-  const { transactions, loading } = useData()
+  const { transactions, loading, pendingCorrelations } = useData()
   const { overrides } = useRecipientOverrides()
+  const [detailTx, setDetailTx] = React.useState<UpiTransaction | null>(null)
 
   const totals = React.useMemo(() => computeTotals(transactions), [transactions])
   const monthly = React.useMemo(() => monthlySeries(transactions), [transactions])
@@ -110,6 +119,7 @@ export function OverviewPage() {
   const outflowTotal = outflowByClass.reduce((s, d) => s + d.value, 0)
 
   const topRecipients = recipients.slice(0, 8)
+  const unknownCount = transactions.filter((t) => t.name === null).length
 
   if (!loading && transactions.length === 0) {
     return (
@@ -148,72 +158,103 @@ export function OverviewPage() {
         <InsightsGrid insights={insights} limit={4} />
       </section>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          kpi={{
-            label: "Total Paid",
-            value: formatINR(totals.outflow),
-            sub: `${totals.paidCount.toLocaleString()} transactions · avg ${formatINR(Math.round(totals.avgOutflow))}`,
-            icon: TrendingUp,
-            accent: "down",
-            spark: paidSpark,
-            sparkColor: "var(--chart-5)",
-            delta: momDelta,
-            deltaLabel: "Outflow change vs previous month",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Total Received",
-            value: formatINR(totals.inflow),
-            sub: `${totals.receivedCount.toLocaleString()} transactions`,
-            icon: ArrowLeftRight,
-            accent: "up",
-            spark: inflowSpark,
-            sparkColor: "var(--chart-2)",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Net Flow",
-            value: formatINR(totals.net),
-            sub: "Received minus paid & sent",
-            icon: ArrowLeftRight,
-            accent: totals.net >= 0 ? "up" : "down",
-            spark: netSpark,
-            sparkColor: totals.net >= 0 ? "var(--chart-2)" : "var(--chart-5)",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Total Transfers",
-            value: formatINR(totals.sent),
-            sub: `${totals.sentCount.toLocaleString()} bank transfers`,
-            icon: ArrowLeftRight,
-            accent: "neutral",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Transactions",
-            value: totals.count.toLocaleString(),
-            sub: `since ${oldestMonthLabel(transactions)}`,
-            icon: ReceiptText,
-            accent: "neutral",
-            spark: countSpark,
-            sparkColor: "var(--chart-1)",
-          }}
-        />
-        <KpiCard
-          kpi={{
-            label: "Unique Recipients",
-            value: totals.uniqueCounterparties.toLocaleString(),
-            sub: `${totals.uniqueMerchants.toLocaleString()} merchants`,
-            icon: Users,
-            accent: "neutral",
-          }}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-4">
+        <a href="#/transactions" className="block">
+          <KpiCard
+            kpi={{
+              label: "Total Paid",
+              value: formatINR(totals.outflow),
+              sub: `${totals.paidCount.toLocaleString()} transactions · avg ${formatINR(Math.round(totals.avgOutflow))}`,
+              icon: TrendingUp,
+              accent: "down",
+              spark: paidSpark,
+              sparkColor: "var(--chart-5)",
+              delta: momDelta,
+              deltaLabel: "Outflow change vs previous month",
+            }}
+          />
+        </a>
+        <a href="#/transactions" className="block">
+          <KpiCard
+            kpi={{
+              label: "Total Received",
+              value: formatINR(totals.inflow),
+              sub: `${totals.receivedCount.toLocaleString()} transactions`,
+              icon: ArrowLeftRight,
+              accent: "up",
+              spark: inflowSpark,
+              sparkColor: "var(--chart-2)",
+            }}
+          />
+        </a>
+        <a href="#/transactions" className="block">
+          <KpiCard
+            kpi={{
+              label: "Net Flow",
+              value: formatINR(totals.net),
+              sub: "Received minus paid & sent",
+              icon: ArrowLeftRight,
+              accent: totals.net >= 0 ? "up" : "down",
+              spark: netSpark,
+              sparkColor: totals.net >= 0 ? "var(--chart-2)" : "var(--chart-5)",
+            }}
+          />
+        </a>
+        <a href="#/transactions" className="block">
+          <KpiCard
+            kpi={{
+              label: "Total Transfers",
+              value: formatINR(totals.sent),
+              sub: `${totals.sentCount.toLocaleString()} bank transfers`,
+              icon: ArrowLeftRight,
+              accent: "neutral",
+            }}
+          />
+        </a>
+        <a href="#/transactions" className="block">
+          <KpiCard
+            kpi={{
+              label: "Transactions",
+              value: totals.count.toLocaleString(),
+              sub: `since ${oldestMonthLabel(transactions)}`,
+              icon: ReceiptText,
+              accent: "neutral",
+              spark: countSpark,
+              sparkColor: "var(--chart-1)",
+            }}
+          />
+        </a>
+        <a href="#/recipients" className="block">
+          <KpiCard
+            kpi={{
+              label: "Unique Recipients",
+              value: totals.uniqueCounterparties.toLocaleString(),
+              sub: `${totals.uniqueMerchants.toLocaleString()} merchants`,
+              icon: Users,
+              accent: "neutral",
+            }}
+          />
+        </a>
       </div>
+
+      {unknownCount > 0 && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Unknown Transactions</p>
+                <p className="text-2xl font-bold text-amber-900 dark:text-amber-100">{unknownCount}</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  {pendingCorrelations} pending reviews
+                </p>
+              </div>
+              <a href="#/ai" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700">
+                Review &rarr;
+              </a>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -224,12 +265,17 @@ export function OverviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {monthlyChartData.length === 0 ? (
+              <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+                No data available
+              </div>
+            ) : (
             <ChartContainer
               config={{
-                a: { label: "Paid", color: "var(--chart-5)" },
-                b: { label: "Received", color: "var(--chart-2)" },
-                c: { label: "Sent", color: "var(--chart-3)" },
-                n: { label: "Net", color: "var(--chart-1)" },
+                outflow: { label: "Paid", color: "var(--chart-5)" },
+                inflow: { label: "Received", color: "var(--chart-2)" },
+                sent: { label: "Sent", color: "var(--chart-3)" },
+                net: { label: "Net", color: "var(--chart-1)" },
               }}
               className="h-72"
             >
@@ -242,13 +288,14 @@ export function OverviewPage() {
                     cursor={false}
                     content={<ChartTooltipContent formatter={(v) => formatINR(Number(v))} />}
                   />
-                  <Area dataKey="a" name="Paid" type="monotone" fill="var(--color-a)" fillOpacity={0.18} stroke="var(--color-a)" stackId="1" />
-                  <Area dataKey="b" name="Received" type="monotone" fill="var(--color-b)" fillOpacity={0.18} stroke="var(--color-b)" stackId="2" />
-                  <Area dataKey="c" name="Sent" type="monotone" fill="var(--color-c)" fillOpacity={0.18} stroke="var(--color-c)" stackId="3" />
-                  <Area dataKey="n" name="Net" type="monotone" fill="transparent" stroke="var(--color-n)" strokeWidth={1.5} strokeDasharray="4 3" />
+                  <Area dataKey="outflow" name="Paid" type="monotone" fill="var(--color-outflow)" fillOpacity={0.18} stroke="var(--color-outflow)" stackId="1" />
+                  <Area dataKey="inflow" name="Received" type="monotone" fill="var(--color-inflow)" fillOpacity={0.18} stroke="var(--color-inflow)" stackId="2" />
+                  <Area dataKey="sent" name="Sent" type="monotone" fill="var(--color-sent)" fillOpacity={0.18} stroke="var(--color-sent)" stackId="3" />
+                  <Area dataKey="net" name="Net" type="monotone" fill="transparent" stroke="var(--color-net)" strokeWidth={1.5} strokeDasharray="4 3" />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -358,7 +405,7 @@ export function OverviewPage() {
           {recent.map((t) => (
             <button
               key={t.id}
-              onClick={() => navigate("/transactions")}
+              onClick={() => setDetailTx(t)}
               className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted"
             >
               <TypeBadge type={t.type} />
@@ -380,6 +427,57 @@ export function OverviewPage() {
           ))}
         </CardContent>
       </Card>
+
+      <Dialog open={!!detailTx} onOpenChange={(o) => { if (!o) setDetailTx(null) }}>
+        {detailTx && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <TypeBadge type={detailTx.type} />
+                {detailTx.name ?? (detailTx.type === "Sent" ? "Bank transfer" : "Unnamed")}
+              </DialogTitle>
+              <DialogDescription>
+                {dateTimeLabel(detailTx.year, detailTx.month, detailTx.day, detailTx.hour, detailTx.minute)} · {weekdayName(detailTx.weekday)}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 text-sm">
+              <div className="flex items-baseline justify-between rounded-lg border bg-muted/40 p-4">
+                <span className="text-muted-foreground">Amount</span>
+                <span
+                  className={cn(
+                    "text-2xl font-semibold tabular-nums",
+                    detailTx.type === "Received" ? "text-emerald-600 dark:text-emerald-400" : ""
+                  )}
+                >
+                  {detailTx.type === "Received" ? "+" : "−"}{formatINRFull(detailTx.amount)}
+                </span>
+              </div>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Type</dt>
+                  <dd className="font-medium">{detailTx.type}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Status</dt>
+                  <dd className="font-medium">{detailTx.status ?? "—"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">Payment method</dt>
+                  <dd className="font-medium">{detailTx.method ?? "—"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">Reference</dt>
+                  <dd className="break-all font-mono text-xs">{detailTx.id}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">Description</dt>
+                  <dd>{detailTx.note}</dd>
+                </div>
+              </dl>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   )
 }

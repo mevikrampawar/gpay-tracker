@@ -15,7 +15,7 @@ import type { CorrelationCandidate } from "./correlate"
 export interface UploadJob {
   id: string
   fileName: string
-  fileKind: "takeout" | "bank_csv" | "bank_xlsx"
+  fileKind: "takeout" | "bank_csv" | "bank_xlsx" | "store_csv" | "cashback_csv" | "voucher_json" | "group_expenses_json"
   fileBytes: ArrayBuffer
   password?: string
   phase: "stored" | "parsed" | "correlated" | "written" | "error"
@@ -83,7 +83,7 @@ export async function hashContent(bytes: ArrayBuffer): Promise<string> {
 export async function enqueueJob(params: {
   id: string
   fileName: string
-  fileKind: "takeout" | "bank_csv" | "bank_xlsx"
+  fileKind: "takeout" | "bank_csv" | "bank_xlsx" | "store_csv" | "cashback_csv" | "voucher_json" | "group_expenses_json"
   fileBytes: ArrayBuffer
   password?: string
 }): Promise<void> {

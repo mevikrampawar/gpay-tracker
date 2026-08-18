@@ -67,7 +67,7 @@ export function EditTransactionSheet({ transaction, open, onOpenChange }: EditTr
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[400px] sm:w-[480px] flex flex-col">
+      <SheetContent side="right" className="w-full sm:w-[480px] flex flex-col">
         <SheetHeader>
           <SheetTitle>Edit Transaction</SheetTitle>
         </SheetHeader>

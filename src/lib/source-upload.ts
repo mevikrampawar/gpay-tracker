@@ -92,13 +92,17 @@ function parseIndianDate(dateStr: string): Date | null {
 export interface UploadResult {
   sourceId: string
   sourceLabel: string
-  sourceKind: "takeout" | "bank_csv"
+  sourceKind: "takeout" | "bank_csv" | "store_csv" | "cashback_csv" | "voucher_json" | "group_expenses_json"
   totalParsed: number
   skipped: number
   inserted: number
   exactMatches: number
   pendingMatches: number
   errors: string[]
+  storeCount?: number
+  rewardsCount?: number
+  vouchersCount?: number
+  groupExpensesCount?: number
 }
 
 /* ------------------------------------------------------------------ */
@@ -138,18 +142,35 @@ function buildResult(
     exactMatches: number
     pendingMatches: number
     errors: string[]
+    storeCount?: number
+    rewardsCount?: number
+    vouchersCount?: number
+    groupExpensesCount?: number
   }
 ): UploadResult {
+  const kindMap: Record<string, UploadResult["sourceKind"]> = {
+    takeout: "takeout",
+    bank_csv: "bank_csv",
+    bank_xlsx: "bank_csv",
+    store_csv: "store_csv",
+    cashback_csv: "cashback_csv",
+    voucher_json: "voucher_json",
+    group_expenses_json: "group_expenses_json",
+  }
   return {
     sourceId: job.sourceId ?? "",
     sourceLabel: job.fileName,
-    sourceKind: job.fileKind === "takeout" ? "takeout" : "bank_csv",
+    sourceKind: kindMap[job.fileKind] ?? "bank_csv",
     totalParsed: counts.totalParsed,
     skipped: counts.skipped ?? 0,
     inserted: counts.inserted,
     exactMatches: counts.exactMatches,
     pendingMatches: counts.pendingMatches,
     errors: counts.errors,
+    storeCount: counts.storeCount,
+    rewardsCount: counts.rewardsCount,
+    vouchersCount: counts.vouchersCount,
+    groupExpensesCount: counts.groupExpensesCount,
   }
 }
 
@@ -812,4 +833,213 @@ export async function uploadBankXlsx(
     pendingMatches: pendingMatches.length,
     errors: [],
   })
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload store transactions CSV (standalone)                         */
+/* ------------------------------------------------------------------ */
+
+export async function uploadStoreCsv(
+  file: File,
+  userId: string,
+  onProgress?: (pct: number, log: string) => void
+): Promise<UploadResult> {
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
+
+  const existingSources = await getSourceByHash(userId, contentHash)
+  if (existingSources.length > 0) {
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "store_csv", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
+  }
+
+  onProgress?.(10, "Parsing store transactions…")
+  const text = new TextDecoder().decode(fileBytes)
+  const parsed = parseStoreTransactionsCsv(text)
+
+  onProgress?.(40, `Writing ${parsed.length} store transactions…`)
+  const source = await insertSource(userId, {
+    kind: "store_csv",
+    label: file.name,
+    file_name: file.name,
+    content_hash: contentHash,
+    raw_record_count: parsed.length,
+  })
+
+  const storeRows = parsed.map((p) => ({
+    ts: p.ts,
+    year: p.year,
+    month: p.month,
+    description: p.description,
+    product: p.product,
+    payment_method: p.paymentMethod,
+    status: p.status,
+    amount_paise: Math.round(p.amount * 100),
+    source_id: source.id,
+  }))
+  await insertStoreTransactions(userId, storeRows)
+
+  onProgress?.(100, `Done! ${parsed.length} store transactions imported.`)
+  return buildResult(
+    { id: contentHash, fileName: file.name, fileKind: "store_csv", fileBytes: contentHashCopy, sourceId: source.id, phase: "written", createdAt: Date.now(), updatedAt: Date.now() },
+    { totalParsed: parsed.length, inserted: parsed.length, exactMatches: 0, pendingMatches: 0, errors: [], storeCount: parsed.length }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload cashback rewards CSV (standalone)                           */
+/* ------------------------------------------------------------------ */
+
+export async function uploadCashbackCsv(
+  file: File,
+  userId: string,
+  onProgress?: (pct: number, log: string) => void
+): Promise<UploadResult> {
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
+
+  const existingSources = await getSourceByHash(userId, contentHash)
+  if (existingSources.length > 0) {
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "cashback_csv", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
+  }
+
+  onProgress?.(10, "Parsing cashback rewards…")
+  const text = new TextDecoder().decode(fileBytes)
+  const parsed = parseCashbackRewards(text)
+
+  onProgress?.(40, `Writing ${parsed.length} cashback rewards…`)
+  const source = await insertSource(userId, {
+    kind: "cashback_csv",
+    label: file.name,
+    file_name: file.name,
+    content_hash: contentHash,
+    raw_record_count: parsed.length,
+  })
+
+  const rewardRows = parsed.map((r) => ({
+    ts: r.ts,
+    year: r.year,
+    month: r.month,
+    currency: r.currency,
+    amount_paise: Math.round(r.amount * 100),
+    description: r.description,
+    source_id: source.id,
+  }))
+  await insertRewards(userId, rewardRows)
+
+  onProgress?.(100, `Done! ${parsed.length} cashback rewards imported.`)
+  return buildResult(
+    { id: contentHash, fileName: file.name, fileKind: "cashback_csv", fileBytes: contentHashCopy, sourceId: source.id, phase: "written", createdAt: Date.now(), updatedAt: Date.now() },
+    { totalParsed: parsed.length, inserted: parsed.length, exactMatches: 0, pendingMatches: 0, errors: [], rewardsCount: parsed.length }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload voucher rewards JSON (standalone)                           */
+/* ------------------------------------------------------------------ */
+
+export async function uploadVoucherJson(
+  file: File,
+  userId: string,
+  onProgress?: (pct: number, log: string) => void
+): Promise<UploadResult> {
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
+
+  const existingSources = await getSourceByHash(userId, contentHash)
+  if (existingSources.length > 0) {
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "voucher_json", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
+  }
+
+  onProgress?.(10, "Parsing voucher rewards…")
+  const text = new TextDecoder().decode(fileBytes)
+  const parsed = parseVoucherRewards(text)
+
+  onProgress?.(40, `Writing ${parsed.length} voucher rewards…`)
+  const source = await insertSource(userId, {
+    kind: "voucher_json",
+    label: file.name,
+    file_name: file.name,
+    content_hash: contentHash,
+    raw_record_count: parsed.length,
+  })
+
+  const voucherRows = parsed.map((v) => ({
+    code: v.code,
+    summary: v.summary,
+    details: v.details,
+    expiry_timestamp: v.expiryTimestamp,
+    source_id: source.id,
+  }))
+  await insertVouchers(userId, voucherRows)
+
+  onProgress?.(100, `Done! ${parsed.length} voucher rewards imported.`)
+  return buildResult(
+    { id: contentHash, fileName: file.name, fileKind: "voucher_json", fileBytes: contentHashCopy, sourceId: source.id, phase: "written", createdAt: Date.now(), updatedAt: Date.now() },
+    { totalParsed: parsed.length, inserted: parsed.length, exactMatches: 0, pendingMatches: 0, errors: [], vouchersCount: parsed.length }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload group expenses JSON (standalone)                            */
+/* ------------------------------------------------------------------ */
+
+export async function uploadGroupExpensesJson(
+  file: File,
+  userId: string,
+  onProgress?: (pct: number, log: string) => void
+): Promise<UploadResult> {
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
+
+  const existingSources = await getSourceByHash(userId, contentHash)
+  if (existingSources.length > 0) {
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "group_expenses_json", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
+  }
+
+  onProgress?.(10, "Parsing group expenses…")
+  const text = new TextDecoder().decode(fileBytes)
+  const parsed = parseGroupExpenses(text)
+
+  onProgress?.(40, `Writing ${parsed.length} group expenses…`)
+  const source = await insertSource(userId, {
+    kind: "group_expenses_json",
+    label: file.name,
+    file_name: file.name,
+    content_hash: contentHash,
+    raw_record_count: parsed.length,
+  })
+
+  const groupRows = parsed.map((g) => ({
+    group_name: g.groupName,
+    creator: g.creator,
+    state: g.state,
+    title: g.title,
+    created_at: g.createdAt,
+    total_amount_paise: g.totalAmount ? Math.round(g.totalAmount * 100) : null,
+    items: g.items,
+    source_id: source.id,
+  }))
+  await insertGroupExpenses(userId, groupRows)
+
+  onProgress?.(100, `Done! ${parsed.length} group expenses imported.`)
+  return buildResult(
+    { id: contentHash, fileName: file.name, fileKind: "group_expenses_json", fileBytes: contentHashCopy, sourceId: source.id, phase: "written", createdAt: Date.now(), updatedAt: Date.now() },
+    { totalParsed: parsed.length, inserted: parsed.length, exactMatches: 0, pendingMatches: 0, errors: [], groupExpensesCount: parsed.length }
+  )
 }

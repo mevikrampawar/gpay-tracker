@@ -211,7 +211,7 @@ export function AnalyticsPage() {
       </div>
 
       <Tabs defaultValue="trends">
-        <TabsList>
+        <TabsList className="overflow-x-auto flex-nowrap">
           <TabsTrigger value="trends">Trends</TabsTrigger>
           <TabsTrigger value="methods">Methods & types</TabsTrigger>
           <TabsTrigger value="when">When you spend</TabsTrigger>
@@ -226,7 +226,7 @@ export function AnalyticsPage() {
                 <CardDescription>Monthly, yearly or cumulative</CardDescription>
               </div>
               <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
-                <TabsList>
+                <TabsList className="overflow-x-auto flex-nowrap">
                   <TabsTrigger value="monthly">Monthly</TabsTrigger>
                   <TabsTrigger value="yearly">Yearly</TabsTrigger>
                   <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
@@ -496,7 +496,7 @@ export function AnalyticsPage() {
                 <CardDescription>How many transactions fall in each amount band</CardDescription>
               </div>
               <Tabs value={distributionType} onValueChange={(v) => setDistributionType(v as typeof distributionType)}>
-                <TabsList>
+                <TabsList className="overflow-x-auto flex-nowrap">
                   <TabsTrigger value="Paid">Paid</TabsTrigger>
                   <TabsTrigger value="Received">Received</TabsTrigger>
                   <TabsTrigger value="Sent">Sent</TabsTrigger>

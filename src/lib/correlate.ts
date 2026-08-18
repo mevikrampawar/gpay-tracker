@@ -77,6 +77,8 @@ export interface CorrelationCandidate {
   matchMethod: "exact_id" | "amount_date_name"
   /** Human-readable reason. */
   reason: string
+  /** Structured match evidence for display. */
+  matchEvidence: string
 }
 
 /**
@@ -134,6 +136,7 @@ export function findCorrelations(
           confidence: 1.0,
           matchMethod: "exact_id",
           reason: `Same UPI ref: ${n.id}`,
+          matchEvidence: `Transaction ID "${normExternalId(n.id)}" matches existing record`,
         })
         continue
       }
@@ -147,6 +150,7 @@ export function findCorrelations(
 
     let bestCandidate: DbTransaction | null = null
     let bestConfidence = 0
+    let bestEvidence = ""
 
     for (const c of candidates) {
       // Must NOT share external_id (that would be exact match above)
@@ -156,11 +160,26 @@ export function findCorrelations(
       if (!sameRecipient(n.name, n.nameKey, c.recipients?.display_name ?? null, null)) continue
 
       // Same amount + same day + same type + same recipient
-      // Confidence: 0.6 (conservative — different sources, no shared ID)
-      const confidence = 0.6
+      // Dynamic confidence based on matched fields
+      const sameName = !!(n.name && c.recipients?.display_name)
+      const sameType = txType === (c.type?.toLowerCase())
+
+      let confidence = 0.5 // base for amount+date match
+      if (sameName) confidence += 0.15    // name matches
+      if (n.type && sameType) confidence += 0.1  // type matches
+      if (!n.name && !c.recipients?.display_name) confidence -= 0.1  // both names null — risky
+
+      // Build evidence
+      const evidence: string[] = []
+      evidence.push(`Amount: ₹${n.amount}`)
+      evidence.push(`Date: ${n.ts.slice(0, 10)}`)
+      if (sameName) evidence.push(`Recipient: ${n.name}`)
+      if (n.type) evidence.push(`Type: ${n.type}`)
+
       if (confidence > bestConfidence) {
         bestConfidence = confidence
         bestCandidate = c
+        bestEvidence = evidence.join(" · ")
       }
     }
 
@@ -171,6 +190,7 @@ export function findCorrelations(
         confidence: bestConfidence,
         matchMethod: "amount_date_name",
         reason: `Same amount (${n.amount}), date (${day}), recipient (${n.name ?? "?"}), but no shared UPI ref`,
+        matchEvidence: bestEvidence,
       })
       continue
     }

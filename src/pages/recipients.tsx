@@ -135,7 +135,7 @@ function RecipientDetail({
         </div>
       </SheetHeader>
 
-      <div className="grid grid-cols-4 gap-px border-b bg-border">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px border-b bg-border">
         <div className="bg-card p-3">
           <div className="text-xs text-muted-foreground">Paid</div>
           <div className="text-lg font-semibold tabular-nums">{formatINR(stat.outflow, true)}</div>
@@ -446,10 +446,10 @@ export function RecipientsPage() {
                   <th className="px-3 py-2 font-medium"><SortBtn col="name" label="Recipient" /></th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium text-right"><SortBtn col="outflow" label="Paid" className="justify-end w-full" /></th>
-                  <th className="px-3 py-2 font-medium text-right"><SortBtn col="inflow" label="Received" className="justify-end w-full" /></th>
-                  <th className="px-3 py-2 font-medium text-right"><SortBtn col="count" label="Txs" className="justify-end w-full" /></th>
+                  <th className="hidden px-3 py-2 font-medium text-right sm:table-cell"><SortBtn col="inflow" label="Received" className="justify-end w-full" /></th>
+                  <th className="hidden px-3 py-2 font-medium text-right sm:table-cell"><SortBtn col="count" label="Txs" className="justify-end w-full" /></th>
                   <th className="px-3 py-2 font-medium text-right"><SortBtn col="avg" label="Avg" className="justify-end w-full" /></th>
-                  <th className="px-3 py-2 font-medium text-right"><SortBtn col="max" label="Max" className="justify-end w-full" /></th>
+                  <th className="hidden px-3 py-2 font-medium text-right sm:table-cell"><SortBtn col="max" label="Max" className="justify-end w-full" /></th>
                   <th className="hidden px-3 py-2 font-medium text-center xl:table-cell" title="Last 6 months spend">6mo</th>
                   <th className="hidden px-3 py-2 font-medium md:table-cell"><SortBtn col="lastTs" label="Last seen" /></th>
                   <th className="px-3 py-2" />
@@ -510,14 +510,14 @@ export function RecipientsPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatINR(r.outflow, true)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                    <td className="hidden px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400 sm:table-cell">
                       {r.inflow > 0 ? formatINR(r.inflow, true) : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">{r.count}</td>
+                    <td className="hidden px-3 py-2 text-right text-muted-foreground tabular-nums sm:table-cell">{r.count}</td>
                     <td className="hidden px-3 py-2 text-right text-muted-foreground tabular-nums sm:table-cell">
                       {formatINR(Math.round(r.avg), true)}
                     </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">{formatINR(r.max, true)}</td>
+                    <td className="hidden px-3 py-2 text-right text-muted-foreground tabular-nums sm:table-cell">{formatINR(r.max, true)}</td>
                     <td className="hidden px-3 py-2 xl:table-cell">
                       <div className="flex justify-center">
                         <Sparkline
