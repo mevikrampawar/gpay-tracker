@@ -2,19 +2,22 @@ import * as React from "react"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { DataProvider } from "@/lib/data-context"
 import { AppShell } from "@/components/app-shell"
-import { useRoute } from "@/lib/router"
-import { OverviewPage } from "@/pages/overview"
-import { TransactionsPage } from "@/pages/transactions"
-import { RecipientsPage } from "@/pages/recipients"
-import { AnalyticsPage } from "@/pages/analytics"
-import { StorePage } from "@/pages/store"
-import { RewardsPage } from "@/pages/rewards"
-import { GroupsPage } from "@/pages/groups"
-import { NeuralPage } from "@/pages/neural"
-import { AiPage } from "@/pages/ai"
-import { UploadPage } from "@/pages/upload"
-import { HelpPage } from "@/pages/help"
+import { useRoute, navigate } from "@/lib/router"
 import { AuthPage } from "@/pages/auth"
+import { Loader2Icon } from "lucide-react"
+
+const OverviewPage = React.lazy(() => import("@/pages/overview").then(m => ({ default: m.OverviewPage })))
+const TransactionsPage = React.lazy(() => import("@/pages/transactions").then(m => ({ default: m.TransactionsPage })))
+const RecipientsPage = React.lazy(() => import("@/pages/recipients").then(m => ({ default: m.RecipientsPage })))
+const AnalyticsPage = React.lazy(() => import("@/pages/analytics").then(m => ({ default: m.AnalyticsPage })))
+const StorePage = React.lazy(() => import("@/pages/store").then(m => ({ default: m.StorePage })))
+const RewardsPage = React.lazy(() => import("@/pages/rewards").then(m => ({ default: m.RewardsPage })))
+const GroupsPage = React.lazy(() => import("@/pages/groups").then(m => ({ default: m.GroupsPage })))
+const NeuralPage = React.lazy(() => import("@/pages/neural").then(m => ({ default: m.NeuralPage })))
+const AiPage = React.lazy(() => import("@/pages/ai").then(m => ({ default: m.AiPage })))
+const UploadPage = React.lazy(() => import("@/pages/upload").then(m => ({ default: m.UploadPage })))
+const HelpPage = React.lazy(() => import("@/pages/help").then(m => ({ default: m.HelpPage })))
+import { Button } from "@/components/ui/button"
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -66,8 +69,18 @@ function PageRouter() {
     case "/help":
       return <HelpPage />
     default:
-      return <OverviewPage />
+      return <NotFoundPage />
   }
+}
+
+function NotFoundPage() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-20">
+      <p className="text-6xl font-bold text-muted-foreground">404</p>
+      <p className="text-lg text-muted-foreground">Page not found</p>
+      <Button onClick={() => navigate("/")}>Go to Overview</Button>
+    </div>
+  )
 }
 
 function AppInner() {
@@ -86,7 +99,9 @@ function AppInner() {
   return (
     <DataProvider>
       <AppShell>
-        <PageRouter />
+        <React.Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2Icon className="size-6 animate-spin text-muted-foreground" /></div>}>
+          <PageRouter />
+        </React.Suspense>
       </AppShell>
     </DataProvider>
   )

@@ -48,7 +48,9 @@ export function suggestUnknownNames(
 
   const dominant = (map: Map<string, number>, minShare: number) => {
     const total = [...map.values()].reduce((s, n) => s + n, 0)
-    const [name, count] = [...map.entries()].sort((a, b) => b[1] - a[1])[0]
+    const sorted = [...map.entries()].sort((a, b) => b[1] - a[1])
+    if (sorted.length === 0) return null
+    const [name, count] = sorted[0]
     if (!name || count < 2) return null
     if (count / total < minShare) return null
     return { name, count, total }

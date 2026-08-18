@@ -194,6 +194,67 @@ export interface BankTx {
   upiRef: string | null
 }
 
+/* ------------------------------------------------------------------ */
+/*  Store / Subscription transactions                                   */
+/* ------------------------------------------------------------------ */
+
+export interface StoreTransaction {
+  id: string | null
+  ts: string | null
+  year: number | null
+  month: number | null
+  description: string | null
+  product: string | null
+  paymentMethod: string | null
+  status: string | null
+  amount: number
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cashback / Rewards                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface CashbackReward {
+  ts: string
+  year: number
+  month: number
+  currency: string
+  amount: number
+  description: string | null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Voucher rewards                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface Voucher {
+  code: string
+  summary: string
+  details: string
+  expiryTimestamp: string | null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Group expenses                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface GroupExpenseItem {
+  amount: number | null
+  state: string
+  payer: string
+}
+
+export interface GroupExpense {
+  id: string
+  groupName: string
+  creator: string
+  state: string
+  title: string
+  createdAt: string
+  totalAmount: number | null
+  items: GroupExpenseItem[]
+}
+
 function parseCsvLine(line: string): string[] {
   const cells: string[] = []
   let cur = ""
@@ -266,20 +327,34 @@ export async function parseBankXlsx(file: File, password?: string): Promise<Bank
   const sheet = wb.Sheets[wb.SheetNames[0]]
   if (!sheet) return []
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
-  if (rows.length === 0) return []
+  // Read all rows as raw arrays to find the real header row
+  const allRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })
+  if (allRows.length === 0) return []
 
-  // Find header keys by fuzzy matching
-  const keys = Object.keys(rows[0])
-  const find = (h: string) => keys.find((k) => k.toLowerCase().includes(h.toLowerCase())) ?? ""
+  // Find header row: contains both "Date" and "Narration" (case-insensitive)
+  const headerIdx = allRows.findIndex((row) =>
+    row.some((cell) => String(cell).trim().toLowerCase() === "date") &&
+    row.some((cell) => String(cell).toLowerCase().includes("narration"))
+  )
+  if (headerIdx === -1) return []
 
-  const dateKey = find("Date")
-  const narrKey = find("Narration")
-  const refKey = find("Chq")
-  const valKey = find("Value")
-  const wdKey = find("Withdrawal")
-  const depKey = find("Deposit")
-  const balKey = find("Balance")
+  const headers = allRows[headerIdx].map((h) => String(h).trim())
+  const dataRows = allRows.slice(headerIdx + 1)
+
+  // Find column indices by fuzzy matching
+  const findIdx = (h: string) =>
+    headers.findIndex((k) => k.toLowerCase().includes(h.toLowerCase()))
+
+  const dateIdx = findIdx("Date")
+  const narrIdx = findIdx("Narration")
+  const refIdx = findIdx("Chq")
+  const valIdx = findIdx("Value")
+  const wdIdx = findIdx("Withdrawal")
+  const depIdx = findIdx("Deposit")
+  const balIdx = findIdx("Balance")
+
+  const getCell = (row: unknown[], idx: number) =>
+    idx === -1 ? "" : String(row[idx] ?? "").trim()
 
   const parseAmt = (v: unknown): number | null => {
     const s = String(v).replace(/,/g, "")
@@ -288,18 +363,130 @@ export async function parseBankXlsx(file: File, password?: string): Promise<Bank
   }
 
   const out: BankTx[] = []
-  for (const row of rows) {
-    const date = String(row[dateKey] ?? "").trim()
+  for (const row of dataRows) {
+    const date = getCell(row, dateIdx)
     if (!date) continue
-    const narration = String(row[narrKey] ?? "").trim()
-    const ref = String(row[refKey] ?? "").trim()
-    const valueDate = String(row[valKey] ?? "").trim()
-    const withdrawal = parseAmt(row[wdKey])
-    const deposit = parseAmt(row[depKey])
-    const balance = parseAmt(row[balKey])
+    const narration = getCell(row, narrIdx)
+    const ref = getCell(row, refIdx)
+    const valueDate = getCell(row, valIdx)
+    const withdrawal = parseAmt(row[wdIdx])
+    const deposit = parseAmt(row[depIdx])
+    const balance = parseAmt(row[balIdx])
     const upiMatch = narration.match(/\b(\d{12,}|[A-Za-z0-9]{16,})\b/)
     const upiRef = upiMatch ? upiMatch[1] : null
     out.push({ date, narration, ref, valueDate, withdrawal, deposit, balance, upiRef })
   }
   return out
+}
+
+/* ------------------------------------------------------------------ */
+/*  Store transactions CSV parser                                       */
+/* ------------------------------------------------------------------ */
+
+function parseIndianAmount(s: string): number | null {
+  const m = String(s ?? "").match(/[\d,]+(?:\.\d+)?/)
+  if (!m) return null
+  return round(parseFloat(m[0].replace(/,/g, "")))
+}
+
+export function parseStoreTransactionsCsv(csvText: string): StoreTransaction[] {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
+  if (lines.length < 2) return []
+  const headers = parseCsvLine(lines[0])
+  const get = (row: string[], h: string) => {
+    const i = headers.indexOf(h)
+    return i === -1 ? "" : row[i]
+  }
+  const out: StoreTransaction[] = []
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line)
+    const amount = parseIndianAmount(get(row, "Amount"))
+    if (amount === null) continue
+    const dt = parseISTDate(get(row, "Time"))
+    out.push({
+      id: get(row, "Transaction ID") || null,
+      ts: dt ? dt.toISOString() : null,
+      year: dt ? dt.getUTCFullYear() : null,
+      month: dt ? dt.getUTCMonth() + 1 : null,
+      description: get(row, "Description") || null,
+      product: get(row, "Product") || null,
+      paymentMethod: get(row, "Payment method") || null,
+      status: get(row, "Status") || null,
+      amount,
+    })
+  }
+  out.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""))
+  return out
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cashback rewards CSV parser                                         */
+/* ------------------------------------------------------------------ */
+
+export function parseCashbackRewards(csvText: string): CashbackReward[] {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
+  const out: CashbackReward[] = []
+  for (const line of lines.slice(1)) {
+    const [date, currency, reward, desc] = parseCsvLine(line)
+    const dt = new Date(date)
+    if (isNaN(dt.getTime())) continue
+    out.push({
+      ts: dt.toISOString(),
+      year: dt.getUTCFullYear(),
+      month: dt.getUTCMonth() + 1,
+      currency: currency || "INR",
+      amount: round(parseFloat(reward || "0")),
+      description: desc || null,
+    })
+  }
+  out.sort((a, b) => a.ts.localeCompare(b.ts))
+  return out
+}
+
+/* ------------------------------------------------------------------ */
+/*  Voucher rewards JSON parser                                         */
+/* ------------------------------------------------------------------ */
+
+export function parseVoucherRewards(jsonText: string): Voucher[] {
+  const content = jsonText.startsWith(")]}'") ? jsonText.slice(jsonText.indexOf("\n")) : jsonText
+  const data = JSON.parse(content)
+  const list: Array<{ code: string; summary?: string; details?: string; expiryTimestamp?: string }> =
+    data.couponRewardExportRecord ?? []
+  return list.map((v) => ({
+    code: v.code,
+    summary: (v.summary || "").trim(),
+    details: (v.details || "").trim(),
+    expiryTimestamp: v.expiryTimestamp ? new Date(v.expiryTimestamp).toISOString() : null,
+  }))
+}
+
+/* ------------------------------------------------------------------ */
+/*  Group expenses JSON parser                                          */
+/* ------------------------------------------------------------------ */
+
+export function parseGroupExpenses(jsonText: string): GroupExpense[] {
+  const data = JSON.parse(jsonText)
+  const list: Array<{
+    group_name: string
+    creator: string
+    state: string
+    title?: string
+    creation_time: string
+    total_amount?: string
+    items?: Array<{ amount?: string; state: string; payer: string }>
+  }> = data.Group_expenses ?? []
+  return list.map((g) => ({
+    id: `${g.group_name}-${g.creation_time}`,
+    groupName: g.group_name,
+    creator: g.creator,
+    state: g.state,
+    title: (g.title || "").trim(),
+    createdAt: g.creation_time,
+    totalAmount: parseIndianAmount(g.total_amount ?? ""),
+    items: (g.items ?? []).map((it) => ({
+      amount: parseIndianAmount(it.amount ?? ""),
+      state: it.state,
+      payer: it.payer,
+    })),
+  }))
 }

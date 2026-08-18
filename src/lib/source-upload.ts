@@ -11,7 +11,22 @@
  */
 
 import JSZip from "jszip"
-import { parseMyActivityHtml, parseBankCsv, parseBankXlsx, nameKey, PasswordRequiredError, type ParsedTransaction } from "@/lib/parse-takeout"
+import {
+  parseMyActivityHtml,
+  parseBankCsv,
+  parseBankXlsx,
+  parseStoreTransactionsCsv,
+  parseCashbackRewards,
+  parseVoucherRewards,
+  parseGroupExpenses,
+  nameKey,
+  PasswordRequiredError,
+  type ParsedTransaction,
+  type StoreTransaction,
+  type CashbackReward,
+  type Voucher,
+  type GroupExpense,
+} from "@/lib/parse-takeout"
 export { PasswordRequiredError }
 import { findCorrelations, buildCorrelationRows, type CorrelationCandidate } from "@/lib/correlate"
 import {
@@ -22,6 +37,10 @@ import {
   insertRecipient,
   insertTransactions,
   insertCorrelations,
+  insertStoreTransactions,
+  insertRewards,
+  insertVouchers,
+  insertGroupExpenses,
   updateTransaction,
   getRecipientByName,
   type DbTransaction,
@@ -138,6 +157,10 @@ export async function uploadTakeoutZip(
 
   // --- Phase 2: PARSE ---
   let parsedTx: ParsedTransaction[] = []
+  let parsedStore: StoreTransaction[] = []
+  let parsedRewards: CashbackReward[] = []
+  let parsedVouchers: Voucher[] = []
+  let parsedGroupExpenses: GroupExpense[] = []
   let skipped = 0
   if (job.phase === "stored") {
     onProgress?.(20, "Extracting and parsing Google Pay activity…")
@@ -154,9 +177,44 @@ export async function uploadTakeoutZip(
       parsedTx = parsed.transactions
       skipped = parsed.skipped
 
-      await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
+      // Parse Store/Subscriptions CSV
+      const storeFile = zip.file(/Google transactions\/.*\.csv$/i)?.[0]
+      if (storeFile) {
+        const csvText = await storeFile.async("text")
+        parsedStore = parseStoreTransactionsCsv(csvText)
+      }
+
+      // Parse Cashback Rewards CSV
+      const cashbackFile = zip.file(/Cashback Rewards\.csv$/i)?.[0]
+      if (cashbackFile) {
+        const csvText = await cashbackFile.async("text")
+        parsedRewards = parseCashbackRewards(csvText)
+      }
+
+      // Parse Voucher Rewards JSON
+      const voucherFile = zip.file(/Voucher Rewards\.json$/i)?.[0]
+      if (voucherFile) {
+        const jsonText = await voucherFile.async("text")
+        parsedVouchers = parseVoucherRewards(jsonText)
+      }
+
+      // Parse Group Expenses JSON
+      const groupFile = zip.file(/Group expenses\.json$/i)?.[0]
+      if (groupFile) {
+        const jsonText = await groupFile.async("text")
+        parsedGroupExpenses = parseGroupExpenses(jsonText)
+      }
+
+      await updateJob(job.id, {
+        phase: "parsed",
+        parsed: parsedTx,
+        parsedStore,
+        parsedRewards,
+        parsedVouchers,
+        parsedGroupExpenses,
+      })
       job = (await getJob(job.id))!
-      onProgress?.(40, `Parsed ${parsedTx.length} transactions (${skipped} skipped).`)
+      onProgress?.(40, `Parsed ${parsedTx.length} transactions, ${parsedStore.length} store, ${parsedRewards.length} rewards, ${parsedVouchers.length} vouchers, ${parsedGroupExpenses.length} group expenses (${skipped} skipped).`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       await updateJob(job.id, { phase: "error", error: msg })
@@ -164,6 +222,10 @@ export async function uploadTakeoutZip(
     }
   } else {
     parsedTx = job.parsed ?? []
+    parsedStore = job.parsedStore ?? []
+    parsedRewards = job.parsedRewards ?? []
+    parsedVouchers = job.parsedVouchers ?? []
+    parsedGroupExpenses = job.parsedGroupExpenses ?? []
     skipped = 0
   }
 
@@ -266,6 +328,46 @@ export async function uploadTakeoutZip(
         }
       }
 
+      onProgress?.(92, "Writing store transactions, rewards, vouchers & group expenses…")
+      // Write store transactions
+      if (parsedStore.length > 0) {
+        const storeRows = parsedStore.map((t) => ({
+          ts: t.ts, year: t.year, month: t.month,
+          description: t.description, product: t.product,
+          payment_method: t.paymentMethod, status: t.status,
+          amount_paise: Math.round(t.amount * 100),
+          source_id: source.id,
+        }))
+        await insertStoreTransactions(userId, storeRows)
+      }
+      // Write rewards
+      if (parsedRewards.length > 0) {
+        const rewardRows = parsedRewards.map((r) => ({
+          ts: r.ts, year: r.year, month: r.month,
+          currency: r.currency, amount_paise: Math.round(r.amount * 100),
+          description: r.description, source_id: source.id,
+        }))
+        await insertRewards(userId, rewardRows)
+      }
+      // Write vouchers
+      if (parsedVouchers.length > 0) {
+        const voucherRows = parsedVouchers.map((v) => ({
+          code: v.code, summary: v.summary, details: v.details,
+          expiry_timestamp: v.expiryTimestamp, source_id: source.id,
+        }))
+        await insertVouchers(userId, voucherRows)
+      }
+      // Write group expenses
+      if (parsedGroupExpenses.length > 0) {
+        const groupRows = parsedGroupExpenses.map((g) => ({
+          group_name: g.groupName, creator: g.creator, state: g.state,
+          title: g.title, created_at: g.createdAt,
+          total_amount_paise: g.totalAmount ? Math.round(g.totalAmount * 100) : null,
+          items: g.items, source_id: source.id,
+        }))
+        await insertGroupExpenses(userId, groupRows)
+      }
+
       await completeJob(job.id)
 
       const result = buildResult(job, {
@@ -276,7 +378,7 @@ export async function uploadTakeoutZip(
         pendingMatches: pendingMatches.length,
         errors: [],
       })
-      onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
+      onProgress?.(100, `Done! ${result.inserted} transactions, ${parsedStore.length} store, ${parsedRewards.length} rewards, ${parsedVouchers.length} vouchers, ${parsedGroupExpenses.length} group expenses imported.`)
       return result
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

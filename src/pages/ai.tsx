@@ -71,10 +71,13 @@ export function AiPage() {
     [transactions]
   )
 
-  const suggestions = React.useMemo(
-    () => suggestUnknownNames(transactions, edits, txNames),
-    [transactions, edits, txNames]
-  )
+  const suggestions = React.useMemo(() => {
+    try {
+      return suggestUnknownNames(transactions, edits, txNames)
+    } catch {
+      return [] as UnknownSuggestion[]
+    }
+  }, [transactions, edits, txNames])
 
   const pending = suggestions.filter((s) => !txNames[s.txId] && !skipped.has(s.txId))
   const highConfidence = pending.filter((s) => s.confidence >= 0.9)
@@ -87,24 +90,23 @@ export function AiPage() {
   }, [monthly])
   const lastMonth = monthly[monthly.length - 1]
 
-  const narrative = React.useMemo(
-    () =>
-      buildAiNarrative(
-        transactions,
-        0,
-        unknownCount,
-        highConfidence.length,
-        0,
-        avgMonthlySpend,
-        lastMonth?.outflow ?? 0,
-        lastMonth ? monthLabel(lastMonth.year, lastMonth.month) : "this month"
-      ),
-    [unknownCount, highConfidence.length, avgMonthlySpend, lastMonth]
-  )
-  narrative.points.unshift({
-    icon: "activity",
-    text: `I analysed ${transactions.length.toLocaleString()} UPI transactions to build this picture.`,
-  })
+  const narrative = React.useMemo(() => {
+    const n = buildAiNarrative(
+      transactions,
+      0,
+      unknownCount,
+      highConfidence.length,
+      0,
+      avgMonthlySpend,
+      lastMonth?.outflow ?? 0,
+      lastMonth ? monthLabel(lastMonth.year, lastMonth.month) : "this month"
+    )
+    n.points.unshift({
+      icon: "activity",
+      text: `I analysed ${transactions.length.toLocaleString()} UPI transactions to build this picture.`,
+    })
+    return n
+  }, [unknownCount, highConfidence.length, avgMonthlySpend, lastMonth, transactions])
 
   if (!loading && transactions.length === 0) {
     return (

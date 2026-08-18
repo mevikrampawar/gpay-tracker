@@ -5,7 +5,7 @@
  * No external dependencies — uses the native IndexedDB API.
  */
 
-import type { ParsedTransaction } from "./parse-takeout"
+import type { ParsedTransaction, StoreTransaction, CashbackReward, Voucher, GroupExpense } from "./parse-takeout"
 import type { CorrelationCandidate } from "./correlate"
 
 /* ------------------------------------------------------------------ */
@@ -20,6 +20,10 @@ export interface UploadJob {
   password?: string
   phase: "stored" | "parsed" | "correlated" | "written" | "error"
   parsed?: ParsedTransaction[]
+  parsedStore?: StoreTransaction[]
+  parsedRewards?: CashbackReward[]
+  parsedVouchers?: Voucher[]
+  parsedGroupExpenses?: GroupExpense[]
   correlationResult?: {
     exactMatches: CorrelationCandidate[]
     pendingMatches: CorrelationCandidate[]

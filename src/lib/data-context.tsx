@@ -5,18 +5,27 @@ import {
   getRecipients,
   getCorrelations,
   getSources,
+  getStoreTransactions,
+  getRewards,
+  getVouchers,
+  getGroupExpenses,
 } from "@/lib/firestore-db"
 import type {
   DbTransaction as RawDbTransaction,
   DbRecipient,
   DbCorrelation,
+  DbStoreTransaction,
+  DbReward,
+  DbVoucher,
+  DbGroupExpense,
 } from "@/lib/firestore-db"
+import { getCachedData, setCachedData } from "./data-cache"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
-export type { RawDbTransaction as DbTransaction, DbRecipient, DbCorrelation }
+export type { RawDbTransaction as DbTransaction, DbRecipient, DbCorrelation, DbStoreTransaction, DbReward, DbVoucher, DbGroupExpense }
 
 export type TransactionType = "Paid" | "Received" | "Sent"
 
@@ -77,6 +86,10 @@ export interface DataState {
   transactions: UpiTransaction[]
   recipients: DbRecipient[]
   correlations: DbCorrelation[]
+  storeTransactions: DbStoreTransaction[]
+  rewards: DbReward[]
+  vouchers: DbVoucher[]
+  groupExpenses: DbGroupExpense[]
   hasData: boolean
   loading: boolean
   error: string | null
@@ -92,41 +105,84 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [dbTx, setDbTx] = React.useState<RawDbTransaction[]>([])
   const [recipients, setRecipients] = React.useState<DbRecipient[]>([])
   const [correlations, setCorr] = React.useState<DbCorrelation[]>([])
+  const [storeTransactions, setStoreTransactions] = React.useState<DbStoreTransaction[]>([])
+  const [rewards, setRewards] = React.useState<DbReward[]>([])
+  const [vouchers, setVouchers] = React.useState<DbVoucher[]>([])
+  const [groupExpenses, setGroupExpenses] = React.useState<DbGroupExpense[]>([])
   const [sourceCount, setSourceCount] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (showLoading = false) => {
     if (!user) {
       setDbTx([])
       setRecipients([])
       setCorr([])
+      setStoreTransactions([])
+      setRewards([])
+      setVouchers([])
+      setGroupExpenses([])
       setSourceCount(0)
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (showLoading) setLoading(true)
     setError(null)
     const errors: string[] = []
-    const [tx, rec, corr, sources] = await Promise.all([
+    const [tx, rec, corr, sources, store, rwds, vchrs, groups] = await Promise.all([
       getTransactions(user.uid).catch((e: unknown) => { errors.push(`transactions: ${e}`); return [] as RawDbTransaction[] }),
       getRecipients(user.uid).catch((e: unknown) => { errors.push(`recipients: ${e}`); return [] as DbRecipient[] }),
       getCorrelations(user.uid).catch((e: unknown) => { errors.push(`correlations: ${e}`); return [] as DbCorrelation[] }),
       getSources(user.uid).catch((e: unknown) => { errors.push(`sources: ${e}`); return [] as { id: string }[] }),
+      getStoreTransactions(user.uid).catch((e: unknown) => { errors.push(`store: ${e}`); return [] as DbStoreTransaction[] }),
+      getRewards(user.uid).catch((e: unknown) => { errors.push(`rewards: ${e}`); return [] as DbReward[] }),
+      getVouchers(user.uid).catch((e: unknown) => { errors.push(`vouchers: ${e}`); return [] as DbVoucher[] }),
+      getGroupExpenses(user.uid).catch((e: unknown) => { errors.push(`groups: ${e}`); return [] as DbGroupExpense[] }),
     ])
     setDbTx(tx)
     setRecipients(rec)
     setCorr(corr)
+    setStoreTransactions(store)
+    setRewards(rwds)
+    setVouchers(vchrs)
+    setGroupExpenses(groups)
     setSourceCount(sources.length)
     if (errors.length > 0) {
       setError(errors.join("; "))
     }
     setLoading(false)
+    setCachedData({ transactions: tx, recipients: rec, correlations: corr, sources, storeTransactions: store, rewards: rwds, vouchers: vchrs, groupExpenses: groups, updatedAt: Date.now() })
   }, [user])
 
+  // Initial load: serve from IDB cache, then refresh in background
   React.useEffect(() => {
-    refresh()
-  }, [refresh])
+    if (!user) return
+    let cancelled = false
+
+    const load = async () => {
+      const cached = await getCachedData()
+      if (cancelled) return
+      if (cached) {
+        setDbTx(cached.transactions)
+        setRecipients(cached.recipients)
+        setCorr(cached.correlations)
+        setStoreTransactions(cached.storeTransactions ?? [])
+        setRewards(cached.rewards ?? [])
+        setVouchers(cached.vouchers ?? [])
+        setGroupExpenses(cached.groupExpenses ?? [])
+        setSourceCount(cached.sources.length)
+        setLoading(false)
+        // background refresh — no loading spinner
+        refresh(false)
+      } else {
+        // no cache — show loading
+        refresh(true)
+      }
+    }
+    load()
+
+    return () => { cancelled = true }
+  }, [user])
 
   const recipientsMap = React.useMemo(
     () => new Map(recipients.map((r) => [r.id, r])),
@@ -147,6 +203,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       transactions,
       recipients,
       correlations,
+      storeTransactions,
+      rewards,
+      vouchers,
+      groupExpenses,
       hasData,
       loading,
       error,

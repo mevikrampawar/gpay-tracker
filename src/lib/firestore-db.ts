@@ -21,6 +21,7 @@ import {
   orderBy,
   limit as fbLimit,
   type DocumentData,
+  type DocumentReference,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 
@@ -233,4 +234,161 @@ export async function updateTransaction(
   data: Partial<Omit<DbTransaction, "id">>
 ): Promise<void> {
   await updateDoc(docRef(userId, "transactions", txId), data as DocumentData)
+}
+
+/* ------------------------------------------------------------------ */
+/*  Store Transactions                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface DbStoreTransaction {
+  id: string
+  ts: string | null
+  year: number | null
+  month: number | null
+  description: string | null
+  product: string | null
+  payment_method: string | null
+  status: string | null
+  amount_paise: number
+  source_id: string | null
+}
+
+export async function getStoreTransactions(userId: string, max = 5000): Promise<DbStoreTransaction[]> {
+  const snap = await getDocs(query(col(userId, "store_transactions"), fbLimit(max)))
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbStoreTransaction))
+}
+
+export async function insertStoreTransactions(
+  userId: string,
+  rows: Omit<DbStoreTransaction, "id">[]
+): Promise<{ id: string }[]> {
+  if (rows.length === 0) return []
+  const refs: { id: string; ref: DocumentReference }[] = []
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = writeBatch(db)
+    const chunk = rows.slice(i, i + 500)
+    for (const row of chunk) {
+      const ref = doc(col(userId, "store_transactions"))
+      batch.set(ref, row)
+      refs.push({ id: ref.id, ref })
+    }
+    await batch.commit()
+  }
+  return refs.map((r) => ({ id: r.id }))
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rewards                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface DbReward {
+  id: string
+  ts: string
+  year: number
+  month: number
+  currency: string
+  amount_paise: number
+  description: string | null
+  source_id: string | null
+}
+
+export async function getRewards(userId: string, max = 5000): Promise<DbReward[]> {
+  const snap = await getDocs(query(col(userId, "rewards"), fbLimit(max)))
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbReward))
+}
+
+export async function insertRewards(
+  userId: string,
+  rows: Omit<DbReward, "id">[]
+): Promise<{ id: string }[]> {
+  if (rows.length === 0) return []
+  const refs: { id: string; ref: DocumentReference }[] = []
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = writeBatch(db)
+    const chunk = rows.slice(i, i + 500)
+    for (const row of chunk) {
+      const ref = doc(col(userId, "rewards"))
+      batch.set(ref, row)
+      refs.push({ id: ref.id, ref })
+    }
+    await batch.commit()
+  }
+  return refs.map((r) => ({ id: r.id }))
+}
+
+/* ------------------------------------------------------------------ */
+/*  Vouchers                                                            */
+/* ------------------------------------------------------------------ */
+
+export interface DbVoucher {
+  id: string
+  code: string
+  summary: string
+  details: string
+  expiry_timestamp: string | null
+  source_id: string | null
+}
+
+export async function getVouchers(userId: string, max = 5000): Promise<DbVoucher[]> {
+  const snap = await getDocs(query(col(userId, "vouchers"), fbLimit(max)))
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbVoucher))
+}
+
+export async function insertVouchers(
+  userId: string,
+  rows: Omit<DbVoucher, "id">[]
+): Promise<{ id: string }[]> {
+  if (rows.length === 0) return []
+  const refs: { id: string; ref: DocumentReference }[] = []
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = writeBatch(db)
+    const chunk = rows.slice(i, i + 500)
+    for (const row of chunk) {
+      const ref = doc(col(userId, "vouchers"))
+      batch.set(ref, row)
+      refs.push({ id: ref.id, ref })
+    }
+    await batch.commit()
+  }
+  return refs.map((r) => ({ id: r.id }))
+}
+
+/* ------------------------------------------------------------------ */
+/*  Group Expenses                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface DbGroupExpense {
+  id: string
+  group_name: string
+  creator: string
+  state: string
+  title: string
+  created_at: string
+  total_amount_paise: number | null
+  items: Array<{ amount: number | null; state: string; payer: string }>
+  source_id: string | null
+}
+
+export async function getGroupExpenses(userId: string, max = 5000): Promise<DbGroupExpense[]> {
+  const snap = await getDocs(query(col(userId, "group_expenses"), fbLimit(max)))
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbGroupExpense))
+}
+
+export async function insertGroupExpenses(
+  userId: string,
+  rows: Omit<DbGroupExpense, "id">[]
+): Promise<{ id: string }[]> {
+  if (rows.length === 0) return []
+  const refs: { id: string; ref: DocumentReference }[] = []
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = writeBatch(db)
+    const chunk = rows.slice(i, i + 500)
+    for (const row of chunk) {
+      const ref = doc(col(userId, "group_expenses"))
+      batch.set(ref, row)
+      refs.push({ id: ref.id, ref })
+    }
+    await batch.commit()
+  }
+  return refs.map((r) => ({ id: r.id }))
 }
