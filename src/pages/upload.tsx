@@ -146,7 +146,7 @@ export function UploadPage() {
         <>
           <div className="mb-4">
             <label className="text-sm font-medium mb-2 block">What are you uploading?</label>
-            <Select value={uploadKind} onValueChange={(v) => setUploadKind(v)}>
+            <Select value={uploadKind} onValueChange={(v) => { if (v) setUploadKind(v) }}>
               <SelectTrigger className="w-full sm:w-64">
                 <SelectValue />
               </SelectTrigger>
