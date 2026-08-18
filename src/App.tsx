@@ -48,6 +48,8 @@ function PageRouter() {
   const path = useRoute()
   const base = path.split("?")[0]
   switch (base) {
+    case "/":
+      return <OverviewPage />
     case "/transactions":
       return <TransactionsPage />
     case "/recipients":
