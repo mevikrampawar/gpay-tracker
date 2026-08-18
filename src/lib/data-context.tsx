@@ -104,7 +104,7 @@ export interface DataState {
   hasData: boolean
   loading: boolean
   error: string | null
-  refresh: () => Promise<void>
+  refresh: (showLoading?: boolean) => Promise<void>
   sourceCount: number
   pendingCorrelations: number
   updateTx: (txId: string, data: Partial<Omit<RawDbTransaction, "id">>) => Promise<void>
