@@ -146,7 +146,7 @@ export async function uploadTakeoutZip(
       const activityFile = zip.file(/My Activity\.html$/i)?.[0]
       if (!activityFile) {
         await updateJob(job.id, { phase: "error", error: "Could not find 'My Activity.html' inside the ZIP." })
-        return buildResult(job, { totalParsed: 0, errors: ["Could not find 'My Activity.html' inside the ZIP. Make sure you're uploading your Google Takeout ZIP."] })
+        return buildResult(job, { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["Could not find 'My Activity.html' inside the ZIP. Make sure you're uploading your Google Takeout ZIP."] })
       }
 
       const activityHtml = await activityFile.async("text")
@@ -313,7 +313,7 @@ export async function uploadBankCsv(
   if (existingSources.length > 0) {
     return buildResult(
       { id: contentHash, fileName: file.name, fileKind: "bank_csv", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
-      { totalParsed: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
     )
   }
 
@@ -335,7 +335,7 @@ export async function uploadBankCsv(
 
       if (bankTx.length === 0) {
         await updateJob(job.id, { phase: "error", error: "No transactions found in CSV." })
-        return buildResult(job, { totalParsed: 0, errors: ["No transactions found in CSV. Expected HDFC bank statement format."] })
+        return buildResult(job, { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["No transactions found in CSV. Expected HDFC bank statement format."] })
       }
 
       parsedTx = bankTx.map((b, i) => {
@@ -500,7 +500,7 @@ export async function uploadBankXlsx(
   if (existingSources.length > 0) {
     return buildResult(
       { id: contentHash, fileName: file.name, fileKind: "bank_xlsx", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
-      { totalParsed: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+      { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
     )
   }
 
@@ -522,7 +522,7 @@ export async function uploadBankXlsx(
 
       if (bankTx.length === 0) {
         await updateJob(job.id, { phase: "error", error: "No transactions found in XLSX." })
-        return buildResult(job, { totalParsed: 0, errors: ["No transactions found in XLSX. Expected HDFC bank statement format."] })
+        return buildResult(job, { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["No transactions found in XLSX. Expected HDFC bank statement format."] })
       }
 
       parsedTx = bankTx.map((b, i) => {
