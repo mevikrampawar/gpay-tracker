@@ -1,19 +1,22 @@
 /**
  * Upload orchestrator — ties parsing, dedup, and Firestore insert together.
  *
- * Flow:
- *   1. User drops a ZIP (Takeout) or individual files (CSV, XLS)
- *   2. Files are extracted and parsed client-side
- *   3. Correlation engine checks for duplicates against existing DB data
- *   4. New transactions are inserted; exact matches are linked; fuzzy matches queued
- *   5. Data context is refreshed
+ * Each upload function follows a 4-phase flow with IndexedDB persistence:
+ *   1. HASH + STORE:  Hash file, create source in Firestore, persist job in IDB
+ *   2. PARSE:         Parse file into ParsedTransaction[], persist in IDB
+ *   3. CORRELATE:     Run correlation engine against existing DB data, persist in IDB
+ *   4. WRITE:         Batch-write to Firestore, delete job from IDB
+ *
+ * If the page reloads mid-upload, the job is resumed from the last persisted phase.
  */
 
 import JSZip from "jszip"
-import { parseMyActivityHtml, parseBankCsv, parseBankXlsx, nameKey, type ParsedTransaction } from "@/lib/parse-takeout"
-import { findCorrelations, buildCorrelationRows } from "@/lib/correlate"
+import { parseMyActivityHtml, parseBankCsv, parseBankXlsx, nameKey, PasswordRequiredError, type ParsedTransaction } from "@/lib/parse-takeout"
+export { PasswordRequiredError }
+import { findCorrelations, buildCorrelationRows, type CorrelationCandidate } from "@/lib/correlate"
 import {
   getSourceByHash,
+  getTransactions,
   insertSource,
   insertSourceRecords,
   insertRecipient,
@@ -23,6 +26,16 @@ import {
   getRecipientByName,
   type DbTransaction,
 } from "@/lib/firestore-db"
+import {
+  hashContent,
+  enqueueJob,
+  getJob,
+  updateJob,
+  completeJob,
+  type UploadJob,
+} from "@/lib/upload-queue"
+
+export { type UploadJob, getIncompleteJobs, deleteJob } from "@/lib/upload-queue"
 
 /* ------------------------------------------------------------------ */
 /*  Upload result                                                      */
@@ -38,15 +51,6 @@ export interface UploadResult {
   exactMatches: number
   pendingMatches: number
   errors: string[]
-}
-
-/* ------------------------------------------------------------------ */
-/*  Content hashing (simple — for dedup at file level)                  */
-/* ------------------------------------------------------------------ */
-
-async function hashContent(data: ArrayBuffer): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", data)
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
 /* ------------------------------------------------------------------ */
@@ -74,133 +78,222 @@ async function ensureRecipient(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main upload function                                               */
+/*  Shared: build UploadResult from job + counts                       */
+/* ------------------------------------------------------------------ */
+
+function buildResult(
+  job: UploadJob,
+  counts: {
+    totalParsed: number
+    skipped?: number
+    inserted: number
+    exactMatches: number
+    pendingMatches: number
+    errors: string[]
+  }
+): UploadResult {
+  return {
+    sourceId: job.sourceId ?? "",
+    sourceLabel: job.fileName,
+    sourceKind: job.fileKind === "takeout" ? "takeout" : "bank_csv",
+    totalParsed: counts.totalParsed,
+    skipped: counts.skipped ?? 0,
+    inserted: counts.inserted,
+    exactMatches: counts.exactMatches,
+    pendingMatches: counts.pendingMatches,
+    errors: counts.errors,
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload Takeout ZIP                                                 */
 /* ------------------------------------------------------------------ */
 
 export async function uploadTakeoutZip(
   file: File,
   userId: string,
-  existingTx: DbTransaction[],
-  onProgress?: (pct: number, msg: string) => void
+  onProgress?: (pct: number, log: string) => void
 ): Promise<UploadResult> {
-  const result: UploadResult = {
-    sourceId: "",
-    sourceLabel: file.name,
-    sourceKind: "takeout",
-    totalParsed: 0,
-    skipped: 0,
-    inserted: 0,
-    exactMatches: 0,
-    pendingMatches: 0,
-    errors: [],
-  }
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
 
-  onProgress?.(5, "Reading ZIP file…")
-
-  const zip = await JSZip.loadAsync(file)
-  const activityFile = zip.file(/My Activity\.html$/i)?.[0]
-  if (!activityFile) {
-    result.errors.push("Could not find 'My Activity.html' inside the ZIP. Make sure you're uploading your Google Takeout ZIP.")
-    return result
-  }
-
-  onProgress?.(20, "Parsing Google Pay activity…")
-
-  const activityHtml = await activityFile.async("text")
-  const { transactions: parsedTx, skipped } = parseMyActivityHtml(activityHtml)
-  result.totalParsed = parsedTx.length
-  result.skipped = skipped
-
-  onProgress?.(40, `Found ${parsedTx.length} transactions. Checking for duplicates…`)
-
-  const fileData = await file.arrayBuffer()
-  const contentHash = await hashContent(fileData)
-
+  // Check for existing source in Firestore (dedup)
   const existingSources = await getSourceByHash(userId, contentHash)
   if (existingSources.length > 0) {
-    result.errors.push("This file was already imported (same content hash). Skipping.")
-    return result
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "takeout", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, skipped: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
   }
 
-  const source = await insertSource(userId, {
-    kind: "takeout",
-    label: file.name,
-    file_name: file.name,
-    content_hash: contentHash,
-    raw_record_count: parsedTx.length,
-  })
-  result.sourceId = source.id
-
-  onProgress?.(55, "Running correlation engine…")
-
-  const { exactMatches, pendingMatches, newOnly } = findCorrelations(parsedTx, existingTx)
-  result.exactMatches = exactMatches.length
-  result.pendingMatches = pendingMatches.length
-
-  onProgress?.(65, `Inserting ${newOnly.length} new transactions…`)
-
-  const sourceRecords = parsedTx.map((t, i) => ({
-    source_id: source.id,
-    row_index: i,
-    raw: t as unknown as Record<string, unknown>,
-  }))
-
-  const insertedRecords = await insertSourceRecords(userId, sourceRecords)
-
-  const recordIdMap = new Map<string, string>()
-  for (let i = 0; i < insertedRecords.length; i++) {
-    recordIdMap.set(parsedTx[i].id, insertedRecords[i].id)
+  // Check IDB for existing job
+  let job = await getJob(contentHash)
+  if (!job) {
+    await enqueueJob({ id: contentHash, fileName: file.name, fileKind: "takeout", fileBytes: contentHashCopy })
+    job = (await getJob(contentHash))!
   }
 
-  onProgress?.(75, "Creating recipients & inserting transactions…")
+  // --- Phase 1: STORED (already done above) ---
 
-  const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
-  const recipientCache = new Map<string, string | null>()
-
-  for (const t of newOnly) {
-    if (t.name && !recipientCache.has(t.nameKey ?? "")) {
-      const rid = await ensureRecipient(userId, t.name)
-      recipientCache.set(t.nameKey ?? "", rid)
-    }
-
-    const direction = t.type === "Received" ? "in" : "out"
-    txRows.push({
-      occurred_at: t.ts,
-      amount_paise: Math.round(t.amount * 100),
-      direction,
-      type: t.type.toLowerCase() as "paid" | "received" | "sent",
-      method: t.method,
-      status: t.status,
-      external_id: t.id,
-      counterparty_id: recipientCache.get(t.nameKey ?? "") ?? null,
-      note: t.note,
-    })
-  }
-
-  const insertedTx = await insertTransactions(userId, txRows)
-  result.inserted = insertedTx.length
-
-  onProgress?.(85, "Creating correlations…")
-
-  const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
-  if (allCorrRows.length > 0) {
-    await insertCorrelations(userId, allCorrRows)
-  }
-
-  for (const m of exactMatches) {
-    if (!m.newRecord.name) continue
-    if (!m.existingTx.counterparty_id) {
-      const rid = await ensureRecipient(userId, m.newRecord.name)
-      if (rid) {
-        await updateTransaction(userId, m.existingTx.id, { counterparty_id: rid })
+  // --- Phase 2: PARSE ---
+  let parsedTx: ParsedTransaction[] = []
+  let skipped = 0
+  if (job.phase === "stored") {
+    onProgress?.(20, "Extracting and parsing Google Pay activity…")
+    try {
+      const zip = await JSZip.loadAsync(job.fileBytes)
+      const activityFile = zip.file(/My Activity\.html$/i)?.[0]
+      if (!activityFile) {
+        await updateJob(job.id, { phase: "error", error: "Could not find 'My Activity.html' inside the ZIP." })
+        return buildResult(job, { totalParsed: 0, errors: ["Could not find 'My Activity.html' inside the ZIP. Make sure you're uploading your Google Takeout ZIP."] })
       }
+
+      const activityHtml = await activityFile.async("text")
+      const parsed = parseMyActivityHtml(activityHtml)
+      parsedTx = parsed.transactions
+      skipped = parsed.skipped
+
+      await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
+      job = (await getJob(job.id))!
+      onProgress?.(40, `Parsed ${parsedTx.length} transactions (${skipped} skipped).`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  } else {
+    parsedTx = job.parsed ?? []
+    skipped = 0
+  }
+
+  // --- Phase 3: CORRELATE ---
+  let exactMatches: CorrelationCandidate[] = []
+  let pendingMatches: CorrelationCandidate[] = []
+  let newOnly: ParsedTransaction[] = []
+  if (job.phase === "parsed") {
+    onProgress?.(50, "Running correlation engine…")
+    try {
+      const existingTx = await getTransactions(userId)
+      const corr = findCorrelations(parsedTx, existingTx)
+      exactMatches = corr.exactMatches
+      pendingMatches = corr.pendingMatches
+      newOnly = corr.newOnly
+
+      await updateJob(job.id, {
+        phase: "correlated",
+        correlationResult: { exactMatches, pendingMatches, newOnly },
+      })
+      job = (await getJob(job.id))!
+      onProgress?.(60, `Correlation complete: ${newOnly.length} new, ${exactMatches.length} exact, ${pendingMatches.length} pending.`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  } else {
+    exactMatches = job.correlationResult?.exactMatches ?? []
+    pendingMatches = job.correlationResult?.pendingMatches ?? []
+    newOnly = job.correlationResult?.newOnly ?? []
+  }
+
+  // --- Phase 4: WRITE ---
+  if (job.phase === "correlated") {
+    onProgress?.(70, `Inserting ${newOnly.length} new transactions…`)
+    try {
+      const source = await insertSource(userId, {
+        kind: "takeout",
+        label: job.fileName,
+        file_name: job.fileName,
+        content_hash: contentHash,
+        raw_record_count: parsedTx.length,
+      })
+      await updateJob(job.id, { sourceId: source.id })
+      job = (await getJob(job.id))!
+
+      const sourceRecords = parsedTx.map((t, i) => ({
+        source_id: source.id,
+        row_index: i,
+        raw: t as unknown as Record<string, unknown>,
+      }))
+      const insertedRecords = await insertSourceRecords(userId, sourceRecords)
+      const recordIdMap = new Map<string, string>()
+      for (let i = 0; i < insertedRecords.length; i++) {
+        recordIdMap.set(parsedTx[i].id, insertedRecords[i].id)
+      }
+
+      onProgress?.(80, "Creating recipients & inserting transactions…")
+      const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
+      const recipientCache = new Map<string, string | null>()
+
+      for (const t of newOnly) {
+        if (t.name && !recipientCache.has(t.nameKey ?? "")) {
+          const rid = await ensureRecipient(userId, t.name)
+          recipientCache.set(t.nameKey ?? "", rid)
+        }
+
+        const direction = t.type === "Received" ? "in" : "out"
+        txRows.push({
+          occurred_at: t.ts,
+          amount_paise: Math.round(t.amount * 100),
+          direction,
+          type: t.type.toLowerCase() as "paid" | "received" | "sent",
+          method: t.method,
+          status: t.status,
+          external_id: t.id,
+          counterparty_id: recipientCache.get(t.nameKey ?? "") ?? null,
+          note: t.note,
+        })
+      }
+
+      const insertedTx = await insertTransactions(userId, txRows)
+
+      onProgress?.(90, "Creating correlations…")
+      const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
+      if (allCorrRows.length > 0) {
+        await insertCorrelations(userId, allCorrRows)
+      }
+
+      for (const m of exactMatches) {
+        if (!m.newRecord.name) continue
+        if (!m.existingTx.counterparty_id) {
+          const rid = await ensureRecipient(userId, m.newRecord.name)
+          if (rid) {
+            await updateTransaction(userId, m.existingTx.id, { counterparty_id: rid })
+          }
+        }
+      }
+
+      await completeJob(job.id)
+
+      const result = buildResult(job, {
+        totalParsed: parsedTx.length,
+        skipped,
+        inserted: insertedTx.length,
+        exactMatches: exactMatches.length,
+        pendingMatches: pendingMatches.length,
+        errors: [],
+      })
+      onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
+      return result
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
     }
   }
 
-  onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
-  return result
+  // Job was already written (resume from terminal state)
+  return buildResult(job, {
+    totalParsed: parsedTx.length,
+    skipped,
+    inserted: 0,
+    exactMatches: exactMatches.length,
+    pendingMatches: pendingMatches.length,
+    errors: [],
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -210,242 +303,368 @@ export async function uploadTakeoutZip(
 export async function uploadBankCsv(
   file: File,
   userId: string,
-  existingTx: DbTransaction[],
-  onProgress?: (pct: number, msg: string) => void
+  onProgress?: (pct: number, log: string) => void
 ): Promise<UploadResult> {
-  const result: UploadResult = {
-    sourceId: "",
-    sourceLabel: file.name,
-    sourceKind: "bank_csv",
-    totalParsed: 0,
-    skipped: 0,
-    inserted: 0,
-    exactMatches: 0,
-    pendingMatches: 0,
-    errors: [],
-  }
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
 
-  onProgress?.(10, "Reading CSV file…")
-
-  const text = await file.text()
-  const bankTx = parseBankCsv(text)
-  result.totalParsed = bankTx.length
-
-  if (bankTx.length === 0) {
-    result.errors.push("No transactions found in CSV. Expected HDFC bank statement format.")
-    return result
-  }
-
-  onProgress?.(30, `Found ${bankTx.length} bank transactions. Checking for duplicates…`)
-
-  const fileData = await file.arrayBuffer()
-  const contentHash = await hashContent(fileData)
   const existingSources = await getSourceByHash(userId, contentHash)
   if (existingSources.length > 0) {
-    result.errors.push("This file was already imported (same content hash). Skipping.")
-    return result
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "bank_csv", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
   }
 
-  const source = await insertSource(userId, {
-    kind: "bank_csv",
-    label: file.name,
-    file_name: file.name,
-    content_hash: contentHash,
-    raw_record_count: bankTx.length,
-  })
-  result.sourceId = source.id
+  let job = await getJob(contentHash)
+  if (!job) {
+    await enqueueJob({ id: contentHash, fileName: file.name, fileKind: "bank_csv", fileBytes: contentHashCopy })
+    job = (await getJob(contentHash))!
+  }
 
-  const sourceRecords = bankTx.map((t, i) => ({
-    source_id: source.id,
-    row_index: i,
-    raw: t as unknown as Record<string, unknown>,
-  }))
+  // --- Phase 2: PARSE ---
+  let parsedTx: ParsedTransaction[] = []
+  let bankTxCount = 0
+  if (job.phase === "stored") {
+    onProgress?.(10, "Parsing CSV file…")
+    try {
+      const text = new TextDecoder().decode(job.fileBytes)
+      const bankTx = parseBankCsv(text)
+      bankTxCount = bankTx.length
 
-  const insertedRecords = await insertSourceRecords(userId, sourceRecords)
+      if (bankTx.length === 0) {
+        await updateJob(job.id, { phase: "error", error: "No transactions found in CSV." })
+        return buildResult(job, { totalParsed: 0, errors: ["No transactions found in CSV. Expected HDFC bank statement format."] })
+      }
 
-  const converted: ParsedTransaction[] = bankTx.map((b, i) => {
-    const dt = new Date(b.date)
-    const isDeposit = b.deposit !== null && b.deposit > 0
-    const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
-    return {
-      id: b.upiRef ?? b.ref ?? `bank-${i}`,
-      ts: dt.toISOString(),
-      year: dt.getFullYear(),
-      month: dt.getMonth() + 1,
-      day: dt.getDate(),
-      hour: dt.getHours(),
-      minute: dt.getMinutes(),
-      weekday: dt.getDay(),
-      type: isDeposit ? "Received" as const : "Paid" as const,
-      amount,
-      name: null,
-      nameKey: null,
-      method: "bank_transfer",
-      status: "Completed",
-      note: b.narration,
+      parsedTx = bankTx.map((b, i) => {
+        const dt = new Date(b.date)
+        const isDeposit = b.deposit !== null && b.deposit > 0
+        const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
+        return {
+          id: b.upiRef ?? b.ref ?? `bank-${i}`,
+          ts: dt.toISOString(),
+          year: dt.getFullYear(),
+          month: dt.getMonth() + 1,
+          day: dt.getDate(),
+          hour: dt.getHours(),
+          minute: dt.getMinutes(),
+          weekday: dt.getDay(),
+          type: isDeposit ? "Received" as const : "Paid" as const,
+          amount,
+          name: null,
+          nameKey: null,
+          method: "bank_transfer",
+          status: "Completed",
+          note: b.narration,
+        }
+      })
+
+      await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
+      job = (await getJob(job.id))!
+      onProgress?.(30, `Parsed ${parsedTx.length} bank transactions.`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
     }
+  } else {
+    parsedTx = job.parsed ?? []
+    bankTxCount = parsedTx.length
+  }
+
+  // --- Phase 3: CORRELATE ---
+  let exactMatches: CorrelationCandidate[] = []
+  let pendingMatches: CorrelationCandidate[] = []
+  let newOnly: ParsedTransaction[] = []
+  if (job.phase === "parsed") {
+    onProgress?.(45, "Running correlation engine…")
+    try {
+      const existingTx = await getTransactions(userId)
+      const corr = findCorrelations(parsedTx, existingTx)
+      exactMatches = corr.exactMatches
+      pendingMatches = corr.pendingMatches
+      newOnly = corr.newOnly
+
+      await updateJob(job.id, {
+        phase: "correlated",
+        correlationResult: { exactMatches, pendingMatches, newOnly },
+      })
+      job = (await getJob(job.id))!
+      onProgress?.(55, `Correlation complete: ${newOnly.length} new, ${exactMatches.length} exact, ${pendingMatches.length} pending.`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  } else {
+    exactMatches = job.correlationResult?.exactMatches ?? []
+    pendingMatches = job.correlationResult?.pendingMatches ?? []
+    newOnly = job.correlationResult?.newOnly ?? []
+  }
+
+  // --- Phase 4: WRITE ---
+  if (job.phase === "correlated") {
+    onProgress?.(65, `Inserting ${newOnly.length} new transactions…`)
+    try {
+      const source = await insertSource(userId, {
+        kind: "bank_csv",
+        label: job.fileName,
+        file_name: job.fileName,
+        content_hash: contentHash,
+        raw_record_count: bankTxCount,
+      })
+      await updateJob(job.id, { sourceId: source.id })
+      job = (await getJob(job.id))!
+
+      const sourceRecords = parsedTx.map((t, i) => ({
+        source_id: source.id,
+        row_index: i,
+        raw: t as unknown as Record<string, unknown>,
+      }))
+      const insertedRecords = await insertSourceRecords(userId, sourceRecords)
+      const recordIdMap = new Map<string, string>()
+      for (let i = 0; i < insertedRecords.length; i++) {
+        recordIdMap.set(parsedTx[i].id, insertedRecords[i].id)
+      }
+
+      onProgress?.(75, "Inserting transactions…")
+      const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
+      for (const t of newOnly) {
+        const direction = t.type === "Received" ? "in" : "out"
+        txRows.push({
+          occurred_at: t.ts,
+          amount_paise: Math.round(t.amount * 100),
+          direction,
+          type: t.type.toLowerCase() as "paid" | "received" | "sent",
+          method: t.method,
+          status: t.status,
+          external_id: t.id,
+          counterparty_id: null,
+          note: t.note,
+        })
+      }
+      const insertedTx = await insertTransactions(userId, txRows)
+
+      onProgress?.(85, "Creating correlations…")
+      const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
+      if (allCorrRows.length > 0) {
+        await insertCorrelations(userId, allCorrRows)
+      }
+
+      await completeJob(job.id)
+
+      const result = buildResult(job, {
+        totalParsed: parsedTx.length,
+        inserted: insertedTx.length,
+        exactMatches: exactMatches.length,
+        pendingMatches: pendingMatches.length,
+        errors: [],
+      })
+      onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
+      return result
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  }
+
+  return buildResult(job, {
+    totalParsed: parsedTx.length,
+    inserted: 0,
+    exactMatches: exactMatches.length,
+    pendingMatches: pendingMatches.length,
+    errors: [],
   })
-
-  onProgress?.(50, "Running correlation engine…")
-
-  const { exactMatches, pendingMatches, newOnly } = findCorrelations(converted, existingTx)
-  result.exactMatches = exactMatches.length
-  result.pendingMatches = pendingMatches.length
-
-  const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
-  for (const t of newOnly) {
-    const direction = t.type === "Received" ? "in" : "out"
-    txRows.push({
-      occurred_at: t.ts,
-      amount_paise: Math.round(t.amount * 100),
-      direction,
-      type: t.type.toLowerCase() as "paid" | "received" | "sent",
-      method: t.method,
-      status: t.status,
-      external_id: t.id,
-      counterparty_id: null,
-      note: t.note,
-    })
-  }
-
-  const insertedTx = await insertTransactions(userId, txRows)
-  result.inserted = insertedTx.length
-
-  const recordIdMap = new Map<string, string>()
-  for (let i = 0; i < insertedRecords.length; i++) {
-    recordIdMap.set(converted[i].id, insertedRecords[i].id)
-  }
-
-  const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
-  if (allCorrRows.length > 0) {
-    await insertCorrelations(userId, allCorrRows)
-  }
-
-  onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
-  return result
 }
 
 /* ------------------------------------------------------------------ */
-/*  Upload bank XLSX                                                    */
+/*  Upload bank XLSX                                                   */
 /* ------------------------------------------------------------------ */
 
 export async function uploadBankXlsx(
   file: File,
   userId: string,
-  existingTx: DbTransaction[],
-  onProgress?: (pct: number, msg: string) => void
+  onProgress?: (pct: number, log: string) => void,
+  password?: string
 ): Promise<UploadResult> {
-  const result: UploadResult = {
-    sourceId: "",
-    sourceLabel: file.name,
-    sourceKind: "bank_csv",
-    totalParsed: 0,
-    skipped: 0,
-    inserted: 0,
-    exactMatches: 0,
-    pendingMatches: 0,
-    errors: [],
-  }
+  const fileBytes = await file.arrayBuffer()
+  const contentHash = await hashContent(fileBytes)
+  const contentHashCopy = new Uint8Array(fileBytes).buffer
 
-  onProgress?.(10, "Reading XLSX file…")
-
-  const bankTx = await parseBankXlsx(file)
-  result.totalParsed = bankTx.length
-
-  if (bankTx.length === 0) {
-    result.errors.push("No transactions found in XLSX. Expected HDFC bank statement format.")
-    return result
-  }
-
-  onProgress?.(30, `Found ${bankTx.length} bank transactions. Checking for duplicates…`)
-
-  const fileData = await file.arrayBuffer()
-  const contentHash = await hashContent(fileData)
   const existingSources = await getSourceByHash(userId, contentHash)
   if (existingSources.length > 0) {
-    result.errors.push("This file was already imported (same content hash). Skipping.")
-    return result
+    return buildResult(
+      { id: contentHash, fileName: file.name, fileKind: "bank_xlsx", fileBytes: contentHashCopy, phase: "stored", createdAt: Date.now(), updatedAt: Date.now() },
+      { totalParsed: 0, errors: ["This file was already imported (same content hash). Skipping."] }
+    )
   }
 
-  const source = await insertSource(userId, {
-    kind: "bank_csv",
-    label: file.name,
-    file_name: file.name,
-    content_hash: contentHash,
-    raw_record_count: bankTx.length,
-  })
-  result.sourceId = source.id
+  let job = await getJob(contentHash)
+  if (!job) {
+    await enqueueJob({ id: contentHash, fileName: file.name, fileKind: "bank_xlsx", fileBytes: contentHashCopy, password })
+    job = (await getJob(contentHash))!
+  }
 
-  const sourceRecords = bankTx.map((t, i) => ({
-    source_id: source.id,
-    row_index: i,
-    raw: t as unknown as Record<string, unknown>,
-  }))
+  // --- Phase 2: PARSE ---
+  let parsedTx: ParsedTransaction[] = []
+  let bankTxCount = 0
+  if (job.phase === "stored") {
+    onProgress?.(10, "Parsing XLSX file…")
+    try {
+      const xlsxFile = new File([job.fileBytes], job.fileName)
+      const bankTx = await parseBankXlsx(xlsxFile, job.password ?? password)
+      bankTxCount = bankTx.length
 
-  const insertedRecords = await insertSourceRecords(userId, sourceRecords)
+      if (bankTx.length === 0) {
+        await updateJob(job.id, { phase: "error", error: "No transactions found in XLSX." })
+        return buildResult(job, { totalParsed: 0, errors: ["No transactions found in XLSX. Expected HDFC bank statement format."] })
+      }
 
-  const converted: ParsedTransaction[] = bankTx.map((b, i) => {
-    const dt = new Date(b.date)
-    const isDeposit = b.deposit !== null && b.deposit > 0
-    const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
-    return {
-      id: b.upiRef ?? b.ref ?? `bank-${i}`,
-      ts: dt.toISOString(),
-      year: dt.getFullYear(),
-      month: dt.getMonth() + 1,
-      day: dt.getDate(),
-      hour: dt.getHours(),
-      minute: dt.getMinutes(),
-      weekday: dt.getDay(),
-      type: isDeposit ? "Received" as const : "Paid" as const,
-      amount,
-      name: null,
-      nameKey: null,
-      method: "bank_transfer",
-      status: "Completed",
-      note: b.narration,
+      parsedTx = bankTx.map((b, i) => {
+        const dt = new Date(b.date)
+        const isDeposit = b.deposit !== null && b.deposit > 0
+        const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
+        return {
+          id: b.upiRef ?? b.ref ?? `bank-${i}`,
+          ts: dt.toISOString(),
+          year: dt.getFullYear(),
+          month: dt.getMonth() + 1,
+          day: dt.getDate(),
+          hour: dt.getHours(),
+          minute: dt.getMinutes(),
+          weekday: dt.getDay(),
+          type: isDeposit ? "Received" as const : "Paid" as const,
+          amount,
+          name: null,
+          nameKey: null,
+          method: "bank_transfer",
+          status: "Completed",
+          note: b.narration,
+        }
+      })
+
+      await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
+      job = (await getJob(job.id))!
+      onProgress?.(30, `Parsed ${parsedTx.length} bank transactions.`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
     }
+  } else {
+    parsedTx = job.parsed ?? []
+    bankTxCount = parsedTx.length
+  }
+
+  // --- Phase 3: CORRELATE ---
+  let exactMatches: CorrelationCandidate[] = []
+  let pendingMatches: CorrelationCandidate[] = []
+  let newOnly: ParsedTransaction[] = []
+  if (job.phase === "parsed") {
+    onProgress?.(45, "Running correlation engine…")
+    try {
+      const existingTx = await getTransactions(userId)
+      const corr = findCorrelations(parsedTx, existingTx)
+      exactMatches = corr.exactMatches
+      pendingMatches = corr.pendingMatches
+      newOnly = corr.newOnly
+
+      await updateJob(job.id, {
+        phase: "correlated",
+        correlationResult: { exactMatches, pendingMatches, newOnly },
+      })
+      job = (await getJob(job.id))!
+      onProgress?.(55, `Correlation complete: ${newOnly.length} new, ${exactMatches.length} exact, ${pendingMatches.length} pending.`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  } else {
+    exactMatches = job.correlationResult?.exactMatches ?? []
+    pendingMatches = job.correlationResult?.pendingMatches ?? []
+    newOnly = job.correlationResult?.newOnly ?? []
+  }
+
+  // --- Phase 4: WRITE ---
+  if (job.phase === "correlated") {
+    onProgress?.(65, `Inserting ${newOnly.length} new transactions…`)
+    try {
+      const source = await insertSource(userId, {
+        kind: "bank_csv",
+        label: job.fileName,
+        file_name: job.fileName,
+        content_hash: contentHash,
+        raw_record_count: bankTxCount,
+      })
+      await updateJob(job.id, { sourceId: source.id })
+      job = (await getJob(job.id))!
+
+      const sourceRecords = parsedTx.map((t, i) => ({
+        source_id: source.id,
+        row_index: i,
+        raw: t as unknown as Record<string, unknown>,
+      }))
+      const insertedRecords = await insertSourceRecords(userId, sourceRecords)
+      const recordIdMap = new Map<string, string>()
+      for (let i = 0; i < insertedRecords.length; i++) {
+        recordIdMap.set(parsedTx[i].id, insertedRecords[i].id)
+      }
+
+      onProgress?.(75, "Inserting transactions…")
+      const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
+      for (const t of newOnly) {
+        const direction = t.type === "Received" ? "in" : "out"
+        txRows.push({
+          occurred_at: t.ts,
+          amount_paise: Math.round(t.amount * 100),
+          direction,
+          type: t.type.toLowerCase() as "paid" | "received" | "sent",
+          method: t.method,
+          status: t.status,
+          external_id: t.id,
+          counterparty_id: null,
+          note: t.note,
+        })
+      }
+      const insertedTx = await insertTransactions(userId, txRows)
+
+      onProgress?.(85, "Creating correlations…")
+      const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
+      const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
+      if (allCorrRows.length > 0) {
+        await insertCorrelations(userId, allCorrRows)
+      }
+
+      await completeJob(job.id)
+
+      const result = buildResult(job, {
+        totalParsed: parsedTx.length,
+        inserted: insertedTx.length,
+        exactMatches: exactMatches.length,
+        pendingMatches: pendingMatches.length,
+        errors: [],
+      })
+      onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
+      return result
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await updateJob(job.id, { phase: "error", error: msg })
+      throw err
+    }
+  }
+
+  return buildResult(job, {
+    totalParsed: parsedTx.length,
+    inserted: 0,
+    exactMatches: exactMatches.length,
+    pendingMatches: pendingMatches.length,
+    errors: [],
   })
-
-  onProgress?.(50, "Running correlation engine…")
-
-  const { exactMatches, pendingMatches, newOnly } = findCorrelations(converted, existingTx)
-  result.exactMatches = exactMatches.length
-  result.pendingMatches = pendingMatches.length
-
-  const txRows: Omit<DbTransaction, "id" | "recipients">[] = []
-  for (const t of newOnly) {
-    const direction = t.type === "Received" ? "in" : "out"
-    txRows.push({
-      occurred_at: t.ts,
-      amount_paise: Math.round(t.amount * 100),
-      direction,
-      type: t.type.toLowerCase() as "paid" | "received" | "sent",
-      method: t.method,
-      status: t.status,
-      external_id: t.id,
-      counterparty_id: null,
-      note: t.note,
-    })
-  }
-
-  const insertedTx = await insertTransactions(userId, txRows)
-  result.inserted = insertedTx.length
-
-  const recordIdMap = new Map<string, string>()
-  for (let i = 0; i < insertedRecords.length; i++) {
-    recordIdMap.set(converted[i].id, insertedRecords[i].id)
-  }
-
-  const corrRows = buildCorrelationRows(exactMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const pendingCorrRows = buildCorrelationRows(pendingMatches, (pt) => recordIdMap.get(pt.id) ?? null)
-  const allCorrRows = [...corrRows, ...pendingCorrRows].filter((r) => r.source_record_id)
-  if (allCorrRows.length > 0) {
-    await insertCorrelations(userId, allCorrRows)
-  }
-
-  onProgress?.(100, `Done! ${result.inserted} new, ${result.exactMatches} linked, ${result.pendingMatches} pending review.`)
-  return result
 }

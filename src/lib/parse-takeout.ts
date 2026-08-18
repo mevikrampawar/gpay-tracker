@@ -71,6 +71,13 @@ function prettyName(raw: string): string {
   return out.replace(/^McDonalds$/i, "McDonald's").replace(/^Amazon Pay/i, "Amazon Pay")
 }
 
+export class PasswordRequiredError extends Error {
+  constructor() {
+    super("File is password-protected")
+    this.name = "PasswordRequiredError"
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Parsed transaction type                                            */
 /* ------------------------------------------------------------------ */
@@ -244,10 +251,18 @@ export function parseBankCsv(csvText: string): BankTx[] {
 /*  HDFC Bank statement XLSX parser (browser)                          */
 /* ------------------------------------------------------------------ */
 
-export async function parseBankXlsx(file: File): Promise<BankTx[]> {
+export async function parseBankXlsx(file: File, password?: string): Promise<BankTx[]> {
   const XLSX = await import("xlsx")
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { type: "array" })
+  let wb
+  try {
+    wb = XLSX.read(buf, { type: "array", password: password || "" })
+  } catch (e) {
+    if (e instanceof Error && (e.message.includes("password") || e.message.includes("Password"))) {
+      throw new PasswordRequiredError()
+    }
+    throw e
+  }
   const sheet = wb.Sheets[wb.SheetNames[0]]
   if (!sheet) return []
 

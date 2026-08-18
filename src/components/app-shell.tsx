@@ -16,6 +16,7 @@ import {
   Sun,
   Monitor,
   CircleUser,
+  Loader2,
 } from "lucide-react"
 import {
   Sidebar,
@@ -43,6 +44,7 @@ import { computeTotals, buildRecipientStats } from "@/lib/analytics"
 import { formatINR } from "@/lib/format"
 import { useRecipientOverrides } from "@/lib/recipient-overrides"
 import { useData } from "@/lib/data-context"
+import { getIncompleteJobs, deleteJob, type UploadJob } from "@/lib/upload-queue"
 
 export const NAV_ITEMS = [
   { path: "/", label: "Overview", icon: LayoutDashboard },
@@ -174,6 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const path = useRoute()
   const { transactions } = useData()
   const [paletteOpen, setPaletteOpen] = React.useState(false)
+  const [incompleteJobs, setIncompleteJobs] = React.useState<UploadJob[]>([])
   const pathRef = React.useRef(path)
   pathRef.current = path
 
@@ -186,6 +189,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  React.useEffect(() => {
+    getIncompleteJobs().then(setIncompleteJobs)
+  }, [])
+
+  React.useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === "visible") {
+        getIncompleteJobs().then(setIncompleteJobs)
+      }
+    }
+    document.addEventListener("visibilitychange", handler)
+    return () => document.removeEventListener("visibilitychange", handler)
   }, [])
 
   return (
@@ -212,7 +229,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </Sidebar>
       <SidebarInset>
         <TopBar path={path} onOpenPalette={() => setPaletteOpen(true)} />
-        <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">{children}</div>
+        <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
+          {incompleteJobs.length > 0 && incompleteJobs.map(job => (
+            <div key={job.id} className="flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 mb-4">
+              <div className="flex items-center gap-3">
+                <Loader2 className="size-4 animate-spin text-amber-500" />
+                <div>
+                  <p className="text-sm font-medium">Upload in progress: {job.fileName}</p>
+                  <p className="text-xs text-muted-foreground">Phase: {job.phase}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => navigate("/upload")}>
+                  Resume
+                </Button>
+                <Button size="sm" variant="ghost" onClick={async () => {
+                  await deleteJob(job.id)
+                  setIncompleteJobs(prev => prev.filter(j => j.id !== job.id))
+                }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ))}
+          {children}
+        </div>
       </SidebarInset>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </SidebarProvider>

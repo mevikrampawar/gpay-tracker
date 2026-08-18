@@ -7,7 +7,7 @@ import {
   onAuthStateChanged,
   type User,
 } from "firebase/auth"
-import { getFirestore } from "firebase/firestore"
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore"
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -22,6 +22,14 @@ const app = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const googleProvider = new GoogleAuthProvider()
 export const db = getFirestore(app)
+
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code === "failed-precondition") {
+    console.warn("Firestore persistence: multiple tabs open, using primary tab")
+  } else if (err.code === "unimplemented") {
+    console.warn("Firestore persistence: browser does not support IndexedDB")
+  }
+})
 
 export { signInWithPopup, signOut, onAuthStateChanged }
 export type { User }

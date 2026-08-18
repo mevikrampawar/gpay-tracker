@@ -93,7 +93,7 @@ function docRef(userId: string, coll: string, id: string) {
 /*  Reads                                                               */
 /* ------------------------------------------------------------------ */
 
-export async function getTransactions(userId: string, max = 1000): Promise<DbTransaction[]> {
+export async function getTransactions(userId: string, max = 10000): Promise<DbTransaction[]> {
   const snap = await getDocs(
     query(col(userId, "transactions"), orderBy("occurred_at", "desc"), fbLimit(max))
   )
@@ -107,7 +107,7 @@ export async function getRecipients(userId: string): Promise<DbRecipient[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbRecipient))
 }
 
-export async function getCorrelations(userId: string, max = 5000): Promise<DbCorrelation[]> {
+export async function getCorrelations(userId: string, max = 50000): Promise<DbCorrelation[]> {
   const snap = await getDocs(
     query(col(userId, "correlations"), fbLimit(max))
   )

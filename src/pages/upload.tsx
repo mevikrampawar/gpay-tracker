@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/page-header"
-import { uploadTakeoutZip, uploadBankCsv, uploadBankXlsx, type UploadResult } from "@/lib/source-upload"
+import { uploadTakeoutZip, uploadBankCsv, uploadBankXlsx, type UploadResult, PasswordRequiredError } from "@/lib/source-upload"
 import { useAuth } from "@/lib/auth-context"
 import { useData } from "@/lib/data-context"
 import { navigate } from "@/lib/router"
@@ -28,7 +30,7 @@ type Phase = "idle" | "uploading" | "done" | "error"
 
 export function UploadPage() {
   const { user } = useAuth()
-  const { dbTransactions, refresh } = useData()
+  const { refresh } = useData()
 
   const [phase, setPhase] = React.useState<Phase>("idle")
   const [dragging, setDragging] = React.useState(false)
@@ -36,6 +38,10 @@ export function UploadPage() {
   const [statusMsg, setStatusMsg] = React.useState("")
   const [result, setResult] = React.useState<UploadResult | null>(null)
   const [fileName, setFileName] = React.useState("")
+  const [progressLogs, setProgressLogs] = React.useState<Array<{ time: number; message: string }>>([])
+  const [passwordModal, setPasswordModal] = React.useState<{ open: boolean; error: boolean }>({ open: false, error: false })
+  const [passwordInput, setPasswordInput] = React.useState("")
+  const pendingFileRef = React.useRef<File | null>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
 
   const reset = () => {
@@ -44,13 +50,15 @@ export function UploadPage() {
     setStatusMsg("")
     setResult(null)
     setFileName("")
+    setProgressLogs([])
   }
 
-  const handleFile = async (file: File) => {
+  const handleFile = async (file: File, password?: string) => {
     if (!user) return
     setFileName(file.name)
     setPhase("uploading")
     setProgress(0)
+    setProgressLogs([])
     setStatusMsg("Starting upload…")
 
     try {
@@ -65,15 +73,26 @@ export function UploadPage() {
       }
 
       const uploadFn = isZip ? uploadTakeoutZip : isXlsx ? uploadBankXlsx : uploadBankCsv
-      const uploadResult = await uploadFn(file, user.uid, dbTransactions, (pct, msg) => {
+      const uploadResult = await uploadFn(file, user.uid, (pct, log) => {
         setProgress(pct)
-        setStatusMsg(msg)
-      })
+        setProgressLogs(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].message === log) return prev
+          return [...prev, { time: Date.now(), message: log }]
+        })
+      }, isXlsx ? password : undefined)
 
       setResult(uploadResult)
       setPhase("done")
       await refresh()
     } catch (err) {
+      if (err instanceof PasswordRequiredError) {
+        const wasRetry = passwordInput.length > 0
+        pendingFileRef.current = file
+        setPasswordModal({ open: true, error: wasRetry })
+        if (!wasRetry) setPasswordInput("")
+        setPhase("idle")
+        return
+      }
       setPhase("error")
       setStatusMsg(err instanceof Error ? err.message : "Upload failed. Please try again.")
     }
@@ -82,13 +101,14 @@ export function UploadPage() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragging(false)
+    if (phase === "uploading") return
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
   }
 
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault()
-    setDragging(true)
+    if (phase !== "uploading") setDragging(true)
   }
 
   const onDragLeave = () => setDragging(false)
@@ -150,18 +170,37 @@ export function UploadPage() {
 
       {phase === "uploading" && (
         <Card>
-          <CardContent className="flex flex-col gap-4 py-8">
+          <CardContent className="flex flex-col gap-4 py-6">
             <div className="flex items-center gap-3">
               <Loader2 className="size-5 animate-spin text-primary" />
               <span className="text-sm font-medium">{fileName}</span>
             </div>
+
             <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-sm text-muted-foreground">{statusMsg}</p>
+
+            <div className="max-h-48 overflow-y-auto rounded-lg border bg-muted/30 p-3">
+              {progressLogs.map((entry, i) => (
+                <div key={i} className="flex items-start gap-2 py-1 text-sm">
+                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-green-500" />
+                  <span className="text-muted-foreground">{entry.message}</span>
+                </div>
+              ))}
+              {progressLogs.length === 0 && (
+                <div className="flex items-center gap-2 py-1 text-sm">
+                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                  <span className="text-muted-foreground">Starting...</span>
+                </div>
+              )}
+            </div>
+
+            <Button variant="outline" size="sm" onClick={() => { setPhase("idle"); setProgressLogs([]) }}>
+              Cancel
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -218,6 +257,57 @@ export function UploadPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={passwordModal.open} onOpenChange={(open) => setPasswordModal(prev => ({ ...prev, open }))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Password Protected File</DialogTitle>
+            <DialogDescription>
+              This file is password-protected. Enter the password to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <Input
+              type="password"
+              placeholder="Enter password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && passwordInput.trim()) {
+                  setPasswordModal({ open: false, error: false })
+                  if (pendingFileRef.current) {
+                    handleFile(pendingFileRef.current, passwordInput.trim())
+                  }
+                }
+              }}
+            />
+            {passwordModal.error && (
+              <p className="text-sm text-destructive">Incorrect password. Please try again.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!passwordInput.trim()}
+                onClick={() => {
+                  setPasswordModal({ open: false, error: false })
+                  if (pendingFileRef.current) {
+                    handleFile(pendingFileRef.current, passwordInput.trim())
+                  }
+                }}
+              >
+                Unlock
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPasswordModal({ open: false, error: false })}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
