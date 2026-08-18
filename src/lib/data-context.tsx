@@ -9,6 +9,15 @@ import {
   getRewards,
   getVouchers,
   getGroupExpenses,
+  updateTransaction,
+  subscribeTransactions,
+  subscribeRecipients,
+  subscribeCorrelations,
+  subscribeSources,
+  subscribeStoreTransactions,
+  subscribeRewards,
+  subscribeVouchers,
+  subscribeGroupExpenses,
 } from "@/lib/firestore-db"
 import type {
   DbTransaction as RawDbTransaction,
@@ -30,6 +39,7 @@ export type { RawDbTransaction as DbTransaction, DbRecipient, DbCorrelation, DbS
 export type TransactionType = "Paid" | "Received" | "Sent"
 
 export interface UpiTransaction {
+  dbId: string
   id: string
   ts: string
   year: number
@@ -59,6 +69,7 @@ function dbTxToUpiTx(t: RawDbTransaction, recipientsMap: Map<string, DbRecipient
   const recipient = t.counterparty_id ? recipientsMap.get(t.counterparty_id) ?? null : null
 
   return {
+    dbId: t.id,
     id: t.external_id ?? t.id,
     ts: t.occurred_at,
     year: ist.getUTCFullYear(),
@@ -96,6 +107,7 @@ export interface DataState {
   refresh: () => Promise<void>
   sourceCount: number
   pendingCorrelations: number
+  updateTx: (txId: string, data: Partial<Omit<RawDbTransaction, "id">>) => Promise<void>
 }
 
 const DataCtx = React.createContext<DataState | null>(null)
@@ -154,12 +166,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setCachedData({ transactions: tx, recipients: rec, correlations: corr, sources, storeTransactions: store, rewards: rwds, vouchers: vchrs, groupExpenses: groups, updatedAt: Date.now() })
   }, [user])
 
-  // Initial load: serve from IDB cache, then refresh in background
+  // Initial load: serve from IDB cache, then subscribe to real-time updates
   React.useEffect(() => {
     if (!user) return
     let cancelled = false
 
     const load = async () => {
+      // Step 1: Try cache for instant render
       const cached = await getCachedData()
       if (cancelled) return
       if (cached) {
@@ -172,17 +185,76 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setGroupExpenses(cached.groupExpenses ?? [])
         setSourceCount(cached.sources.length)
         setLoading(false)
-        // background refresh — no loading spinner
-        refresh(false)
       } else {
-        // no cache — show loading
-        refresh(true)
+        setLoading(true)
+      }
+
+      // Step 2: Subscribe to real-time updates
+      const unsubs = [
+        subscribeTransactions(user.uid, (txs) => {
+          if (cancelled) return
+          setDbTx(txs)
+          setLoading(false)
+        }),
+        subscribeRecipients(user.uid, (recs) => {
+          if (cancelled) return
+          setRecipients(recs)
+        }),
+        subscribeCorrelations(user.uid, (corrs) => {
+          if (cancelled) return
+          setCorr(corrs)
+        }),
+        subscribeSources(user.uid, (srcs) => {
+          if (cancelled) return
+          setSourceCount(srcs.length)
+        }),
+        subscribeStoreTransactions(user.uid, (items) => {
+          if (cancelled) return
+          setStoreTransactions(items)
+        }),
+        subscribeRewards(user.uid, (items) => {
+          if (cancelled) return
+          setRewards(items)
+        }),
+        subscribeVouchers(user.uid, (items) => {
+          if (cancelled) return
+          setVouchers(items)
+        }),
+        subscribeGroupExpenses(user.uid, (items) => {
+          if (cancelled) return
+          setGroupExpenses(items)
+        }),
+      ]
+
+      return () => {
+        cancelled = true
+        unsubs.forEach((u) => u())
       }
     }
-    load()
 
-    return () => { cancelled = true }
+    let cleanup: (() => void) | undefined
+    load().then((fn) => { if (!cancelled) cleanup = fn })
+    return () => { cancelled = true; cleanup?.() }
   }, [user])
+
+  // Debounced IDB cache update — writes 5s after last data change
+  React.useEffect(() => {
+    if (!user || loading) return
+    const timeout = setTimeout(() => {
+      setCachedData({
+        transactions: dbTx,
+        recipients,
+        correlations,
+        sources: [], // sources only tracked by count; cache stores [] as fallback
+        storeTransactions,
+        rewards,
+        vouchers,
+        groupExpenses,
+        updatedAt: Date.now(),
+      })
+    }, 5000)
+    return () => clearTimeout(timeout)
+  }, [user, loading, dbTx, recipients, correlations, storeTransactions, rewards, vouchers, groupExpenses])
 
   const recipientsMap = React.useMemo(
     () => new Map(recipients.map((r) => [r.id, r])),
@@ -196,6 +268,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const hasData = dbTx.length > 0 || sourceCount > 0
   const pendingCorrelations = correlations.filter((c) => c.status === "pending").length
+
+  const updateTx = React.useCallback(async (txId: string, data: Partial<Omit<RawDbTransaction, "id">>) => {
+    if (!user) return
+    await updateTransaction(user.uid, txId, data)
+    refresh(false)
+  }, [user, refresh])
 
   return (
     <DataCtx.Provider value={{
@@ -213,6 +291,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       refresh,
       sourceCount,
       pendingCorrelations,
+      updateTx,
     }}>
       {children}
     </DataCtx.Provider>

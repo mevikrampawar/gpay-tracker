@@ -293,7 +293,7 @@ export function parseBankCsv(csvText: string): BankTx[] {
     if (!line.trim()) continue
     const row = parseCsvLine(line)
     const date = get(row, "Date")
-    if (!date) continue
+    if (!date || !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(date.trim())) continue
     const narration = get(row, "Narration")
     const ref = get(row, "Chq/Ref")
     const valueDate = get(row, "Value")
@@ -365,7 +365,7 @@ export async function parseBankXlsx(file: File, password?: string): Promise<Bank
   const out: BankTx[] = []
   for (const row of dataRows) {
     const date = getCell(row, dateIdx)
-    if (!date) continue
+    if (!date || !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(date.trim())) continue
     const narration = getCell(row, narrIdx)
     const ref = getCell(row, refIdx)
     const valueDate = getCell(row, valIdx)

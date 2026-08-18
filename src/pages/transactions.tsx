@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ReceiptText, Search, Filter, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Users, X, Upload, ArrowRight } from "lucide-react"
+import { ReceiptText, Search, Filter, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Users, X, Upload, ArrowRight, Pencil } from "lucide-react"
 import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ExportButton } from "@/components/export-button"
+import { EditTransactionSheet } from "@/components/edit-transaction-sheet"
 import { TypeBadge } from "@/components/transaction-badges"
 import { useData } from "@/lib/data-context"
 import type { UpiTransaction } from "@/lib/data-context"
@@ -110,13 +111,22 @@ function sortTransactions(tx: UpiTransaction[], key: SortKey, dir: SortDir): Upi
   })
 }
 
-function TransactionDetail({ t }: { t: UpiTransaction }) {
+function TransactionDetail({ t, onEdit }: { t: UpiTransaction; onEdit: (tx: UpiTransaction) => void }) {
   return (
     <DialogContent>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <TypeBadge type={t.type} />
           {t.name ?? (t.type === "Sent" ? "Bank transfer" : "Unnamed")}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() => onEdit(t)}
+          >
+            <Pencil className="size-4 mr-1" />
+            Edit
+          </Button>
         </DialogTitle>
         <DialogDescription>
           {dateTimeLabel(t.year, t.month, t.day, t.hour, t.minute)} · {weekdayName(t.weekday)}
@@ -169,6 +179,8 @@ export function TransactionsPage() {
   const [page, setPage] = React.useState(0)
   const [pageSize, setPageSize] = React.useState(50)
   const [selected, setSelected] = React.useState<UpiTransaction | null>(null)
+  const [editingTx, setEditingTx] = React.useState<UpiTransaction | null>(null)
+  const [editSheetOpen, setEditSheetOpen] = React.useState(false)
 
   const methods = React.useMemo(() => methodsList(transactions), [transactions])
 
@@ -526,8 +538,23 @@ export function TransactionsPage() {
       </div>
 
       <Dialog open={!!selected} onOpenChange={(o) => { if (!o) setSelected(null) }}>
-        {selected && <TransactionDetail t={selected} />}
+        {selected && (
+          <TransactionDetail
+            t={selected}
+            onEdit={(tx) => {
+              setEditingTx(tx)
+              setEditSheetOpen(true)
+              setSelected(null)
+            }}
+          />
+        )}
       </Dialog>
+
+      <EditTransactionSheet
+        transaction={editingTx}
+        open={editSheetOpen}
+        onOpenChange={setEditSheetOpen}
+      />
     </div>
   )
 }

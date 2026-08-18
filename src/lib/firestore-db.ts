@@ -20,6 +20,7 @@ import {
   query,
   orderBy,
   limit as fbLimit,
+  onSnapshot,
   type DocumentData,
   type DocumentReference,
 } from "firebase/firestore"
@@ -391,4 +392,102 @@ export async function insertGroupExpenses(
     await batch.commit()
   }
   return refs.map((r) => ({ id: r.id }))
+}
+
+/* ------------------------------------------------------------------ */
+/*  Real-time subscriptions                                             */
+/* ------------------------------------------------------------------ */
+
+export function subscribeTransactions(
+  userId: string,
+  callback: (txs: DbTransaction[]) => void,
+  max = 10000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "transactions"), orderBy("occurred_at", "desc"), fbLimit(max)),
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbTransaction)))
+    }
+  )
+}
+
+export function subscribeRecipients(
+  userId: string,
+  callback: (recs: DbRecipient[]) => void
+): () => void {
+  return onSnapshot(
+    query(col(userId, "recipients"), orderBy("canonical_name")),
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbRecipient)))
+    }
+  )
+}
+
+export function subscribeCorrelations(
+  userId: string,
+  callback: (corr: DbCorrelation[]) => void,
+  max = 50000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "correlations"), fbLimit(max)),
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbCorrelation)))
+    }
+  )
+}
+
+export function subscribeSources(
+  userId: string,
+  callback: (src: { id: string }[]) => void
+): () => void {
+  return onSnapshot(
+    col(userId, "sources"),
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id })))
+    }
+  )
+}
+
+export function subscribeStoreTransactions(
+  userId: string,
+  callback: (items: DbStoreTransaction[]) => void,
+  max = 5000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "store_transactions"), fbLimit(max)),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbStoreTransaction)))
+  )
+}
+
+export function subscribeRewards(
+  userId: string,
+  callback: (items: DbReward[]) => void,
+  max = 5000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "rewards"), fbLimit(max)),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbReward)))
+  )
+}
+
+export function subscribeVouchers(
+  userId: string,
+  callback: (items: DbVoucher[]) => void,
+  max = 5000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "vouchers"), fbLimit(max)),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbVoucher)))
+  )
+}
+
+export function subscribeGroupExpenses(
+  userId: string,
+  callback: (items: DbGroupExpense[]) => void,
+  max = 5000
+): () => void {
+  return onSnapshot(
+    query(col(userId, "group_expenses"), fbLimit(max)),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DbGroupExpense)))
+  )
 }

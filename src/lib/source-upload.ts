@@ -56,6 +56,35 @@ import {
 
 export { type UploadJob, getIncompleteJobs, deleteJob } from "@/lib/upload-queue"
 
+/**
+ * Parse Indian DD/MM/YY date format.
+ * HDFC bank statements use DD/MM/YY, not MM/DD/YY.
+ */
+function parseIndianDate(dateStr: string): Date | null {
+  const trimmed = dateStr.trim()
+  const parts = trimmed.split("/")
+  if (parts.length < 3) return null
+
+  const [dd, mm, yy] = parts
+  const day = parseInt(dd, 10)
+  const month = parseInt(mm, 10)
+  let year = parseInt(yy, 10)
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null
+
+  // Handle 2-digit years
+  if (year < 100) year += 2000
+
+  // Validate ranges
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > 31) return null
+
+  const dt = new Date(year, month - 1, day)
+  // Verify the date is valid (handles Feb 30, etc.)
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) return null
+
+  return dt
+}
+
 /* ------------------------------------------------------------------ */
 /*  Upload result                                                      */
 /* ------------------------------------------------------------------ */
@@ -440,28 +469,35 @@ export async function uploadBankCsv(
         return buildResult(job, { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["No transactions found in CSV. Expected HDFC bank statement format."] })
       }
 
-      parsedTx = bankTx.map((b, i) => {
-        const dt = new Date(b.date)
-        const isDeposit = b.deposit !== null && b.deposit > 0
-        const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
-        return {
-          id: b.upiRef ?? b.ref ?? `bank-${i}`,
-          ts: dt.toISOString(),
-          year: dt.getFullYear(),
-          month: dt.getMonth() + 1,
-          day: dt.getDate(),
-          hour: dt.getHours(),
-          minute: dt.getMinutes(),
-          weekday: dt.getDay(),
-          type: isDeposit ? "Received" as const : "Paid" as const,
-          amount,
-          name: null,
-          nameKey: null,
-          method: "bank_transfer",
-          status: "Completed",
-          note: b.narration,
+      parsedTx = []
+      for (let i = 0; i < bankTx.length; i++) {
+        try {
+          const b = bankTx[i]
+          const dt = parseIndianDate(b.date)
+          if (!dt || isNaN(dt.getTime())) continue
+          const isDeposit = b.deposit !== null && b.deposit > 0
+          const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
+          parsedTx.push({
+            id: b.upiRef ?? b.ref ?? `bank-${i}`,
+            ts: dt.toISOString(),
+            year: dt.getFullYear(),
+            month: dt.getMonth() + 1,
+            day: dt.getDate(),
+            hour: dt.getHours(),
+            minute: dt.getMinutes(),
+            weekday: dt.getDay(),
+            type: isDeposit ? "Received" as const : "Paid" as const,
+            amount,
+            name: null,
+            nameKey: null,
+            method: "bank_transfer",
+            status: "Completed",
+            note: b.narration,
+          })
+        } catch {
+          continue
         }
-      })
+      }
 
       await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
       job = (await getJob(job.id))!
@@ -627,28 +663,35 @@ export async function uploadBankXlsx(
         return buildResult(job, { totalParsed: 0, inserted: 0, exactMatches: 0, pendingMatches: 0, errors: ["No transactions found in XLSX. Expected HDFC bank statement format."] })
       }
 
-      parsedTx = bankTx.map((b, i) => {
-        const dt = new Date(b.date)
-        const isDeposit = b.deposit !== null && b.deposit > 0
-        const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
-        return {
-          id: b.upiRef ?? b.ref ?? `bank-${i}`,
-          ts: dt.toISOString(),
-          year: dt.getFullYear(),
-          month: dt.getMonth() + 1,
-          day: dt.getDate(),
-          hour: dt.getHours(),
-          minute: dt.getMinutes(),
-          weekday: dt.getDay(),
-          type: isDeposit ? "Received" as const : "Paid" as const,
-          amount,
-          name: null,
-          nameKey: null,
-          method: "bank_transfer",
-          status: "Completed",
-          note: b.narration,
+      parsedTx = []
+      for (let i = 0; i < bankTx.length; i++) {
+        try {
+          const b = bankTx[i]
+          const dt = parseIndianDate(b.date)
+          if (!dt || isNaN(dt.getTime())) continue
+          const isDeposit = b.deposit !== null && b.deposit > 0
+          const amount = isDeposit ? (b.deposit ?? 0) : (b.withdrawal ?? 0)
+          parsedTx.push({
+            id: b.upiRef ?? b.ref ?? `bank-${i}`,
+            ts: dt.toISOString(),
+            year: dt.getFullYear(),
+            month: dt.getMonth() + 1,
+            day: dt.getDate(),
+            hour: dt.getHours(),
+            minute: dt.getMinutes(),
+            weekday: dt.getDay(),
+            type: isDeposit ? "Received" as const : "Paid" as const,
+            amount,
+            name: null,
+            nameKey: null,
+            method: "bank_transfer",
+            status: "Completed",
+            note: b.narration,
+          })
+        } catch {
+          continue
         }
-      })
+      }
 
       await updateJob(job.id, { phase: "parsed", parsed: parsedTx })
       job = (await getJob(job.id))!

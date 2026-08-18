@@ -174,7 +174,7 @@ function SidebarFooterCard() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const path = useRoute()
-  const { transactions } = useData()
+  const { transactions, refresh } = useData()
   const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [incompleteJobs, setIncompleteJobs] = React.useState<UploadJob[]>([])
   const pathRef = React.useRef(path)
@@ -199,11 +199,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const handler = () => {
       if (document.visibilityState === "visible") {
         getIncompleteJobs().then(setIncompleteJobs)
+        // onSnapshot handles real-time updates, but if the tab was
+        // backgrounded for a long time, force a refresh to catch up
+        refresh(false)
       }
     }
     document.addEventListener("visibilitychange", handler)
     return () => document.removeEventListener("visibilitychange", handler)
-  }, [])
+  }, [refresh])
 
   return (
     <SidebarProvider>
